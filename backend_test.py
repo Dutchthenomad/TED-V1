@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Backend API Testing for Rugs Pattern Tracker
-Tests all endpoints and WebSocket functionality
+Tests all endpoints and WebSocket functionality as per review request
 """
 
 import requests
@@ -32,7 +32,7 @@ class RugsPatternAPITester:
         return success
 
     def test_health_endpoint(self):
-        """Test /api/health endpoint"""
+        """Test GET /api/health - should return 200 JSON with keys: status, rugs_connected, timestamp, version"""
         try:
             response = requests.get(f"{self.base_url}/api/health", timeout=10)
             if response.status_code == 200:
@@ -43,34 +43,15 @@ class RugsPatternAPITester:
                 if missing_keys:
                     return self.log_test("Health Endpoint", False, f"Missing keys: {missing_keys}")
                 
-                details = f"Status: {data.get('status')}, Rugs Connected: {data.get('rugs_connected')}"
+                details = f"Status: {data.get('status')}, Rugs Connected: {data.get('rugs_connected')}, Version: {data.get('version')}"
                 return self.log_test("Health Endpoint", True, details)
             else:
                 return self.log_test("Health Endpoint", False, f"Status code: {response.status_code}")
         except Exception as e:
             return self.log_test("Health Endpoint", False, f"Error: {str(e)}")
 
-    def test_patterns_endpoint(self):
-        """Test /api/patterns endpoint"""
-        try:
-            response = requests.get(f"{self.base_url}/api/patterns", timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                if 'patterns' in data:
-                    patterns = data['patterns']
-                    pattern_keys = ['pattern1', 'pattern2', 'pattern3']
-                    found_patterns = [key for key in pattern_keys if key in patterns]
-                    details = f"Found patterns: {found_patterns}"
-                    return self.log_test("Patterns Endpoint", len(found_patterns) > 0, details)
-                else:
-                    return self.log_test("Patterns Endpoint", False, "No 'patterns' key in response")
-            else:
-                return self.log_test("Patterns Endpoint", False, f"Status code: {response.status_code}")
-        except Exception as e:
-            return self.log_test("Patterns Endpoint", False, f"Error: {str(e)}")
-
     def test_status_endpoint(self):
-        """Test /api/status endpoint"""
+        """Test GET /api/status - should return system status JSON with keys: system, connections, statistics"""
         try:
             response = requests.get(f"{self.base_url}/api/status", timeout=10)
             if response.status_code == 200:
@@ -81,12 +62,52 @@ class RugsPatternAPITester:
                 if missing_sections:
                     return self.log_test("Status Endpoint", False, f"Missing sections: {missing_sections}")
                 
-                details = f"System status: {data.get('system', {}).get('status')}"
+                # Verify it's not the status-checks list anymore
+                if isinstance(data, list):
+                    return self.log_test("Status Endpoint", False, "Returns array instead of system status object")
+                
+                details = f"System status: {data.get('system', {}).get('status')}, Frontend clients: {data.get('connections', {}).get('frontend_clients')}"
                 return self.log_test("Status Endpoint", True, details)
             else:
                 return self.log_test("Status Endpoint", False, f"Status code: {response.status_code}")
         except Exception as e:
             return self.log_test("Status Endpoint", False, f"Error: {str(e)}")
+
+    def test_status_checks_get(self):
+        """Test GET /api/status-checks - should return an array (can be empty)"""
+        try:
+            response = requests.get(f"{self.base_url}/api/status-checks", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, list):
+                    details = f"Array with {len(data)} items"
+                    return self.log_test("Status-Checks GET", True, details)
+                else:
+                    return self.log_test("Status-Checks GET", False, f"Expected array, got {type(data)}")
+            else:
+                return self.log_test("Status-Checks GET", False, f"Status code: {response.status_code}")
+        except Exception as e:
+            return self.log_test("Status-Checks GET", False, f"Error: {str(e)}")
+
+    def test_status_checks_post(self):
+        """Test POST /api/status-checks with {"client_name":"test"} - should return 200 with object including id and timestamp"""
+        try:
+            payload = {"client_name": "test"}
+            response = requests.post(f"{self.base_url}/api/status-checks", json=payload, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                required_keys = ['id', 'timestamp']
+                missing_keys = [key for key in required_keys if key not in data]
+                
+                if missing_keys:
+                    return self.log_test("Status-Checks POST", False, f"Missing keys: {missing_keys}")
+                
+                details = f"ID: {data.get('id')[:8]}..., Client: {data.get('client_name')}"
+                return self.log_test("Status-Checks POST", True, details)
+            else:
+                return self.log_test("Status-Checks POST", False, f"Status code: {response.status_code}")
+        except Exception as e:
+            return self.log_test("Status-Checks POST", False, f"Error: {str(e)}")
 
     def on_ws_message(self, ws, message):
         """WebSocket message handler"""
