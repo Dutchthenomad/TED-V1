@@ -238,7 +238,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 return str(o)
             
 
-            await websocket.send_text(json.dumps(initial_state))
+            await websocket.send_text(json.dumps(initial_state, default=_default))
         while True:
             try:
                 msg = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
