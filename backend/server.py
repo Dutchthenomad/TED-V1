@@ -66,7 +66,7 @@ class StatusCheckCreate(BaseModel):
 async def root():
     return {"message": "Hello World"}
 
-@api_router.post("/status", response_model=StatusCheck)
+@api_router.post("/status-checks", response_model=StatusCheck)
 async def create_status_check(input: StatusCheckCreate):
     status_obj = StatusCheck(**input.dict())
     await db.status_checks.insert_one(status_obj.dict())
