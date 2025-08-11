@@ -72,7 +72,7 @@ async def create_status_check(input: StatusCheckCreate):
     await db.status_checks.insert_one(status_obj.dict())
     return status_obj
 
-@api_router.get("/status", response_model=List[StatusCheck])
+@api_router.get("/status-checks", response_model=List[StatusCheck])
 async def get_status_checks():
     status_checks = await db.status_checks.find().to_list(100)
     # Map to our model to avoid ObjectId issues
