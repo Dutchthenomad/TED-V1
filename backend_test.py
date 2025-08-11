@@ -142,7 +142,7 @@ class RugsPatternAPITester:
         threading.Thread(target=send_ping).start()
 
     def test_websocket_connection(self):
-        """Test WebSocket connection and ping/pong"""
+        """Test WebSocket: connect to ws://localhost:8001/api/ws, await initial JSON, then send 'ping' to receive 'pong' or receive periodic keepalive within 30s"""
         try:
             ws_url = self.base_url.replace('https://', 'wss://').replace('http://', 'ws://') + '/api/ws'
             print(f"🔌 Connecting to WebSocket: {ws_url}")
@@ -163,18 +163,33 @@ class RugsPatternAPITester:
             # Wait for connection and messages
             timeout = 30
             start_time = time.time()
+            initial_json_received = False
+            ping_response_received = False
             
             while time.time() - start_time < timeout:
                 if self.ws_error:
+                    ws.close()
                     return self.log_test("WebSocket Connection", False, f"Connection error: {self.ws_error}")
                 
                 if self.ws_connected and self.ws_messages:
+                    # Check for initial JSON message
+                    if not initial_json_received:
+                        for msg in self.ws_messages:
+                            if isinstance(msg, dict) and msg.get('type') != 'pong':
+                                initial_json_received = True
+                                print("📨 Received initial JSON state")
+                                break
+                    
                     # Check for pong or keepalive response
                     for msg in self.ws_messages:
                         if isinstance(msg, dict):
                             if msg.get('type') in ['pong', 'keepalive']:
+                                ping_response_received = True
                                 ws.close()
-                                return self.log_test("WebSocket Connection", True, f"Received {msg.get('type')} response")
+                                details = f"Received {msg.get('type')} response"
+                                if initial_json_received:
+                                    details += ", Initial JSON received"
+                                return self.log_test("WebSocket Connection", True, details)
                 
                 time.sleep(0.5)
             
@@ -182,53 +197,37 @@ class RugsPatternAPITester:
             
             if not self.ws_connected:
                 return self.log_test("WebSocket Connection", False, "Failed to connect within timeout")
-            elif not self.ws_messages:
-                return self.log_test("WebSocket Connection", False, "No messages received within timeout")
+            elif not initial_json_received:
+                return self.log_test("WebSocket Connection", False, "No initial JSON received within timeout")
+            elif not ping_response_received:
+                return self.log_test("WebSocket Connection", False, "No ping response or keepalive received within timeout")
             else:
-                return self.log_test("WebSocket Connection", False, "No ping response received within timeout")
+                return self.log_test("WebSocket Connection", False, "Timeout waiting for response")
                 
         except Exception as e:
             return self.log_test("WebSocket Connection", False, f"Error: {str(e)}")
 
-    def test_additional_endpoints(self):
-        """Test additional endpoints"""
-        endpoints = [
-            ('/api/history', 'History'),
-            ('/api/metrics', 'Metrics'),
-            ('/api/', 'Root API')
-        ]
-        
-        for endpoint, name in endpoints:
-            try:
-                response = requests.get(f"{self.base_url}{endpoint}", timeout=10)
-                success = response.status_code == 200
-                details = f"Status: {response.status_code}"
-                if success:
-                    try:
-                        data = response.json()
-                        details += f", Keys: {list(data.keys())[:3]}"
-                    except:
-                        details += ", Non-JSON response"
-                self.log_test(f"{name} Endpoint", success, details)
-            except Exception as e:
-                self.log_test(f"{name} Endpoint", False, f"Error: {str(e)}")
-
     def run_all_tests(self):
-        """Run all backend tests"""
-        print("🚀 Starting Backend API Tests")
+        """Run all backend tests as per review request"""
+        print("🚀 Starting Backend API Tests - Review Request Verification")
         print(f"🎯 Target URL: {self.base_url}")
         print("=" * 60)
         
-        # Core endpoint tests
+        # Test specific endpoints as requested
+        print("1) Testing GET /api/health...")
         self.test_health_endpoint()
-        self.test_patterns_endpoint()
+        
+        print("\n2) Testing GET /api/status...")
         self.test_status_endpoint()
         
-        # WebSocket test
-        self.test_websocket_connection()
+        print("\n3) Testing GET /api/status-checks...")
+        self.test_status_checks_get()
         
-        # Additional endpoints
-        self.test_additional_endpoints()
+        print("\n   Testing POST /api/status-checks...")
+        self.test_status_checks_post()
+        
+        print("\n4) Testing WebSocket connection...")
+        self.test_websocket_connection()
         
         # Summary
         print("=" * 60)
