@@ -231,6 +231,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     'total_games': len(pattern_tracker.enhanced_engine.game_history)
                 }
             }
+            # Ensure datetime serializes
+            def _default(o):
+                if isinstance(o, datetime):
+                    return o.isoformat()
+                return str(o)
+            
+
             await websocket.send_text(json.dumps(initial_state))
         while True:
             try:
