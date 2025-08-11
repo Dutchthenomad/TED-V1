@@ -30,7 +30,7 @@ class GameRecord:
     def __post_init__(self):
         if self.end_time and self.start_time:
             self.total_duration_ms = int((self.end_time - self.start_time).total_seconds() * 1000)
-        self.is_ultra_short = self.final_tick &lt;= 10
+        self.is_ultra_short = self.final_tick <= 10
         self.is_max_payout = abs(self.end_price - 0.020000000000000018) &lt; 1e-15
         self.is_moonshot = self.peak_price &gt;= 50.0
 
