@@ -370,17 +370,19 @@ class RugsWebSocketClient:
                     disconnected = []
                     message = json.dumps(dashboard_data)
                     
-                    for ws in connected_clients:
-                        try:
-                            await ws.send_text(message)
-                        except Exception as e:
-                            logger.warning(f"Failed to send to client: {e}")
-                            disconnected.append(ws)
-                    
-                    # Clean up disconnected clients
-                    for ws in disconnected:
-                        if ws in connected_clients:
-                            connected_clients.remove(ws)
+                    if connection_manager:
+                        await connection_manager.broadcast(dashboard_data)
+                    else:
+                        for ws in connected_clients:
+                            try:
+                                await ws.send_text(message)
+                            except Exception as e:
+                                logger.warning(f"Failed to send to client: {e}")
+                                disconnected.append(ws)
+                        # Clean up disconnected clients
+                        for ws in disconnected:
+                            if ws in connected_clients:
+                                connected_clients.remove(ws)
                 
                 # Log game completion
                 if data.get('rugged'):
