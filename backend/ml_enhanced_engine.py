@@ -73,7 +73,7 @@ class SimpleLearningState:
                 for key in self.pattern_weights:
                     if key != 'baseline':
                         self.pattern_weights[key] = min(0.95, self.pattern_weights[key] * 1.01)
-            elif recent_accuracy &lt; 0.5:
+            elif recent_accuracy < 0.5:
                 # Underperforming, slightly decrease weights
                 for key in self.pattern_weights:
                     if key != 'baseline':
