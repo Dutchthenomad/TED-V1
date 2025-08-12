@@ -58,12 +58,12 @@ class RugsPatternAPITester:
             return self.log_test("Health Endpoint", False, f"Error: {str(e)}")
 
     def test_status_endpoint(self):
-        """Test GET /api/status - should return system status JSON with keys: system, connections, statistics"""
+        """Test GET /api/status - should return keys: system, connections, statistics, ml, side_bet_performance"""
         try:
             response = requests.get(f"{self.base_url}/api/status", timeout=10)
             if response.status_code == 200:
                 data = response.json()
-                required_sections = ['system', 'connections', 'statistics']
+                required_sections = ['system', 'connections', 'statistics', 'ml', 'side_bet_performance']
                 missing_sections = [section for section in required_sections if section not in data]
                 
                 if missing_sections:
@@ -73,7 +73,7 @@ class RugsPatternAPITester:
                 if isinstance(data, list):
                     return self.log_test("Status Endpoint", False, "Returns array instead of system status object")
                 
-                details = f"System status: {data.get('system', {}).get('status')}, Frontend clients: {data.get('connections', {}).get('frontend_clients')}"
+                details = f"System status: {data.get('system', {}).get('status')}, ML enabled: {data.get('ml', {}).get('ml_enabled')}"
                 return self.log_test("Status Endpoint", True, details)
             else:
                 return self.log_test("Status Endpoint", False, f"Status code: {response.status_code}")
