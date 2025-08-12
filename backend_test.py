@@ -80,7 +80,105 @@ class RugsPatternAPITester:
         except Exception as e:
             return self.log_test("Status Endpoint", False, f"Error: {str(e)}")
 
-    def test_status_checks_get(self):
+    def test_patterns_endpoint(self):
+        """Test GET /api/patterns - should return patterns, prediction, side_bet_recommendation, ml_status"""
+        try:
+            response = requests.get(f"{self.base_url}/api/patterns", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                required_keys = ['patterns', 'prediction', 'side_bet_recommendation', 'ml_status']
+                missing_keys = [key for key in required_keys if key not in data]
+                
+                if missing_keys:
+                    return self.log_test("Patterns Endpoint", False, f"Missing keys: {missing_keys}")
+                
+                # side_bet_recommendation may be null depending on tick
+                side_bet_status = "present" if data.get('side_bet_recommendation') else "null"
+                details = f"Patterns: {type(data.get('patterns'))}, Prediction: {type(data.get('prediction'))}, Side bet: {side_bet_status}"
+                return self.log_test("Patterns Endpoint", True, details)
+            else:
+                return self.log_test("Patterns Endpoint", False, f"Status code: {response.status_code}")
+        except Exception as e:
+            return self.log_test("Patterns Endpoint", False, f"Error: {str(e)}")
+
+    def test_side_bet_endpoint(self):
+        """Test GET /api/side-bet - should return recommendation + performance + history"""
+        try:
+            response = requests.get(f"{self.base_url}/api/side-bet", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                required_keys = ['recommendation', 'performance', 'history']
+                missing_keys = [key for key in required_keys if key not in data]
+                
+                if missing_keys:
+                    return self.log_test("Side-Bet Endpoint", False, f"Missing keys: {missing_keys}")
+                
+                details = f"Recommendation: {type(data.get('recommendation'))}, Performance: {type(data.get('performance'))}, History count: {len(data.get('history', []))}"
+                return self.log_test("Side-Bet Endpoint", True, details)
+            else:
+                return self.log_test("Side-Bet Endpoint", False, f"Status code: {response.status_code}")
+        except Exception as e:
+            return self.log_test("Side-Bet Endpoint", False, f"Error: {str(e)}")
+
+    def test_prediction_history_endpoint(self):
+        """Test GET /api/prediction-history - should return records + metrics"""
+        try:
+            response = requests.get(f"{self.base_url}/api/prediction-history", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                required_keys = ['records', 'metrics']
+                missing_keys = [key for key in required_keys if key not in data]
+                
+                if missing_keys:
+                    return self.log_test("Prediction History Endpoint", False, f"Missing keys: {missing_keys}")
+                
+                details = f"Records count: {len(data.get('records', []))}, Metrics: {type(data.get('metrics'))}"
+                return self.log_test("Prediction History Endpoint", True, details)
+            else:
+                return self.log_test("Prediction History Endpoint", False, f"Status code: {response.status_code}")
+        except Exception as e:
+            return self.log_test("Prediction History Endpoint", False, f"Error: {str(e)}")
+
+    def test_history_endpoint(self):
+        """Test GET /api/history - should return games array structure"""
+        try:
+            response = requests.get(f"{self.base_url}/api/history", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                required_keys = ['games']
+                missing_keys = [key for key in required_keys if key not in data]
+                
+                if missing_keys:
+                    return self.log_test("History Endpoint", False, f"Missing keys: {missing_keys}")
+                
+                if not isinstance(data.get('games'), list):
+                    return self.log_test("History Endpoint", False, f"Games is not an array: {type(data.get('games'))}")
+                
+                details = f"Games count: {len(data.get('games', []))}, Total games: {data.get('total_games', 0)}"
+                return self.log_test("History Endpoint", True, details)
+            else:
+                return self.log_test("History Endpoint", False, f"Status code: {response.status_code}")
+        except Exception as e:
+            return self.log_test("History Endpoint", False, f"Error: {str(e)}")
+
+    def test_metrics_endpoint(self):
+        """Test GET /api/metrics - should return pattern_statistics, side_bet_metrics, system_performance, constants"""
+        try:
+            response = requests.get(f"{self.base_url}/api/metrics", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                required_keys = ['pattern_statistics', 'side_bet_metrics', 'system_performance', 'constants']
+                missing_keys = [key for key in required_keys if key not in data]
+                
+                if missing_keys:
+                    return self.log_test("Metrics Endpoint", False, f"Missing keys: {missing_keys}")
+                
+                details = f"Pattern stats: {type(data.get('pattern_statistics'))}, Constants: {type(data.get('constants'))}"
+                return self.log_test("Metrics Endpoint", True, details)
+            else:
+                return self.log_test("Metrics Endpoint", False, f"Status code: {response.status_code}")
+        except Exception as e:
+            return self.log_test("Metrics Endpoint", False, f"Error: {str(e)}")
         """Test GET /api/status-checks - should return an array (can be empty)"""
         try:
             response = requests.get(f"{self.base_url}/api/status-checks", timeout=10)
