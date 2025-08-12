@@ -397,6 +397,11 @@ class RugsWebSocketClient:
                 system_stats['total_errors'] += 1
                 system_stats['last_error'] = f"Game update error: {str(e)}"
 
+        @self.sio.event
+        async def message(data):
+            # Do nothing (listen-only)
+            pass
+
     async def connect_to_rugs(self):
         """Connect to Rugs.fun backend"""
         rugs_url = os.getenv('RUGS_BACKEND_URL', 'https://backend.rugs.fun?frontend-version=1.0')
