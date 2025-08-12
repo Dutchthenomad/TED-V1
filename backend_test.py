@@ -219,10 +219,15 @@ class RugsPatternAPITester:
         try:
             data = json.loads(message)
             self.ws_messages.append(data)
-            print(f"📨 WebSocket received: {data.get('type', 'unknown')} message")
+            msg_type = data.get('type', 'unknown')
+            print(f"📨 WebSocket received: {msg_type} message")
+            # Debug: show first few keys for unknown messages
+            if msg_type == 'unknown' and isinstance(data, dict):
+                keys = list(data.keys())[:3]
+                print(f"   Keys: {keys}")
         except json.JSONDecodeError:
             self.ws_messages.append(message)
-            print(f"📨 WebSocket received raw: {message}")
+            print(f"📨 WebSocket received raw: {message[:100]}...")
 
     def on_ws_error(self, ws, error):
         """WebSocket error handler"""
