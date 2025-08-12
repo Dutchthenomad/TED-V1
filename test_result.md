@@ -129,17 +129,17 @@
 ##         -working: true
 ##         -agent: "main"
 ##         -comment: "Confirmed dependencies present; scipy retained."
-##   - task: "Update game_aware_ml_engine with ultra-short gate and classifier"
+##   - task: "Integrate hazard+conformal+ultra-short gate wrapper and drift hooks"
 ##     implemented: true
-##     working: true
+##     working: "NA"
 ##     file: "/app/backend/game_aware_ml_engine.py"
 ##     stuck_count: 0
 ##     priority: "high"
-##     needs_retesting: false
+##     needs_retesting: true
 ##     status_history:
 ##         -working: "NA"
 ##         -agent: "main"
-##         -comment: "Rewrote engine with UltraShortClassifier, gate at tick<25, performance metrics surfaced in ml_status; aligned with server integration."
+##         -comment: "Replaced engine with compatibility wrapper subclassing MLEnhancedPatternEngine; added hazard_head.py, conformal_wrapper.py, drift_detectors.py, ultra_short_gate.py; preserved API and shapes."
 ##         -working: true
 ##         -agent: "testing"
 ##         -comment: "✅ ML ENGINE WORKING: ML status endpoint returns proper structure with learning engine performance metrics, ultra-short classifier status, and system health indicators. All ML-enhanced predictions functioning correctly through /api/patterns endpoint."
