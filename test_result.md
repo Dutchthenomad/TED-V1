@@ -160,26 +160,32 @@
 ##         -comment: "No changes required; backend preserves fields." 
 ##   - task: "Average End Price card below Live Tracking with selectable window (5,10,20,25,50,100) default 20; compute from WS prediction_history only"
 ##     implemented: true
-##     working: "NA"
+##     working: true
 ##     file: "/app/frontend/src/App.js"
 ##     stuck_count: 0
 ##     priority: "high"
-##     needs_retesting: true
+##     needs_retesting: false
 ##     status_history:
 ##         -working: "NA"
 ##         -agent: "main"
 ##         -comment: "Added avgWindow dropdown in Live Tracking header; computes mean end_price over available records up to selected window; no persistence per user."
+##         -working: true
+##         -agent: "testing"
+##         -comment: "✅ AVERAGE END PRICE CARD FULLY FUNCTIONAL: Card appears below Live Tracking with title 'Average End Price'. Dropdown present with all required options [5,10,20,25,50,100] and default value 20. Displayed value shows proper 6-decimal format (0.011530). Dropdown changes update values correctly (changed to 5 showed 0.012968). No outbound API requests triggered by dropdown changes - confirmed read-only behavior. All requirements met."
 ##   - task: "Top Bar ML badges: show prediction_method and active modules badges (kept Performance panel)"
 ##     implemented: true
-##     working: "NA"
+##     working: true
 ##     file: "/app/frontend/src/App.js"
 ##     stuck_count: 0
 ##     priority: "medium"
-##     needs_retesting: true
+##     needs_retesting: false
 ##     status_history:
 ##         -working: "NA"
 ##         -agent: "main"
 ##         -comment: "App Top Bar now shows Method and badges (hazard/gate/conformal); Performance panel kept intact."
+##         -working: true
+##         -agent: "testing"
+##         -comment: "✅ TOP BAR ML BADGES WORKING: Top Bar displays connection status (CONNECTED), Game/Tick/Price/Version labels, ML Method label, and all three module badges (hazard, gate, conformal) are present and visible. All review request requirements satisfied."
 ## metadata:
 ##   created_by: "main_agent"
 ##   version: "1.3"
