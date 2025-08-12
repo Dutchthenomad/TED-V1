@@ -418,6 +418,7 @@ const TreasuryPatternDashboard = () => {
 
         {/* Row 3 */}
         <div className="col-span-4 min-h-0 overflow-hidden">
+          {/* SideBetPanel hidden until recommendation is available */}
           <SideBetPanel sideBet={sideBet} performance={sideBetPerf} />
         </div>
         <div className="col-span-8 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
