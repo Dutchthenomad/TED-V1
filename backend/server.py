@@ -86,11 +86,69 @@ async def get_status_checks():
 
 app.include_router(api_router)
 
-# Import enhanced pattern engine
-from enhanced_pattern_engine import IntegratedPatternTracker
+# Import base enhanced engine and ML layer
+from enhanced_pattern_engine import EnhancedPatternEngine, GameRecord
+from game_aware_ml_engine import GameAwareMLPatternEngine
 
-# Global state
-pattern_tracker = IntegratedPatternTracker()
+# Global state: ML-integrated tracker
+class MLIntegratedTracker:
+    def __init__(self):
+        self.enhanced_engine = EnhancedPatternEngine()
+        self.ml_engine = GameAwareMLPatternEngine(self.enhanced_engine)
+        self.current_game = None
+
+    def process_game_update(self, data):
+        game_id = data.get('gameId', 0)
+        current_tick = data.get('tickCount', 0)
+        current_price = data.get('price', 1.0)
+        is_active = data.get('active', True)
+        is_rugged = data.get('rugged', False)
+        if not self.current_game or self.current_game['gameId'] != game_id:
+            if self.current_game:
+                completed_game = GameRecord(
+                    game_id=self.current_game['gameId'],
+                    start_time=self.current_game['startTime'],
+                    end_time=datetime.now(),
+                    final_tick=self.current_game.get('currentTick', 0),
+                    end_price=self.current_game.get('currentPrice', 0.0),
+                    peak_price=self.current_game.get('peak_price', 1.0)
+                )
+                self.ml_engine.complete_game_analysis(completed_game)
+            self.current_game = {
+                'gameId': game_id,
+                'startTime': datetime.now(),
+                'peak_price': current_price
+            }
+            self.enhanced_engine.pattern_states['pattern3']['current_peak'] = current_price
+            self.enhanced_engine.pattern_states['pattern3']['threshold_alerts'] = []
+        self.current_game.update({
+            'currentTick': current_tick,
+            'currentPrice': current_price,
+            'isActive': is_active,
+            'isRugged': is_rugged
+        })
+        if current_price > self.current_game['peak_price']:
+            self.current_game['peak_price'] = current_price
+        self.enhanced_engine.update_current_game(current_tick, current_price)
+        self.ml_engine.update_current_game(current_tick, current_price)
+        prediction = self.ml_engine.predict_rug_timing(current_tick, current_price, self.current_game['peak_price'])
+        patterns = self.enhanced_engine.get_pattern_dashboard_data()
+        return {
+            'game_state': {
+                'gameId': game_id,
+                'currentTick': current_tick,
+                'currentPrice': current_price,
+                'isActive': is_active,
+                'isRugged': is_rugged
+            },
+            'patterns': patterns,
+            'prediction': prediction,
+            'ml_status': self.ml_engine.get_ml_status(),
+            'timestamp': datetime.now().isoformat(),
+            'enhanced': True
+        }
+
+pattern_tracker = MLIntegratedTracker()
 connected_clients: List[WebSocket] = []
 system_stats = {
     'start_time': datetime.now(),
@@ -133,7 +191,6 @@ class RugsWebSocketClient:
             try:
                 dashboard_data = pattern_tracker.process_game_update(data)
                 system_stats['total_game_updates'] += 1
-
                 if connected_clients:
                     disconnected = []
                     message = json.dumps(dashboard_data)
@@ -146,10 +203,8 @@ class RugsWebSocketClient:
                     for ws in disconnected:
                         if ws in connected_clients:
                             connected_clients.remove(ws)
-
                 if data.get('rugged'):
                     logger.info(f"🚨 GAME RUGGED: #{data.get('gameId')} at tick {data.get('tickCount')}")
-
             except Exception as e:
                 logger.error(f"❌ Error processing game update: {e}")
                 system_stats['total_errors'] += 1
@@ -206,7 +261,6 @@ async def shutdown_event():
         except Exception:
             pass
 
-# WebSocket endpoint (must be under /api)
 @app.websocket("/api/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -219,11 +273,12 @@ async def websocket_endpoint(websocket: WebSocket):
             initial_state = {
                 'game_state': pattern_tracker.current_game,
                 'patterns': pattern_tracker.enhanced_engine.get_pattern_dashboard_data(),
-                'prediction': pattern_tracker.enhanced_engine.predict_rug_timing(
+                'prediction': pattern_tracker.ml_engine.predict_rug_timing(
                     pattern_tracker.current_game.get('currentTick', 0),
                     pattern_tracker.current_game.get('currentPrice', 1.0),
                     pattern_tracker.current_game.get('peak_price', 1.0)
                 ),
+                'ml_status': pattern_tracker.ml_engine.get_ml_status(),
                 'system_status': {
                     'rugs_connected': rugs_client.connected,
                     'uptime_seconds': int((datetime.now() - system_stats['start_time']).total_seconds()),
@@ -253,7 +308,6 @@ async def websocket_endpoint(websocket: WebSocket):
         if websocket in connected_clients:
             connected_clients.remove(websocket)
 
-# REST endpoints under /api
 @app.get("/api/health")
 async def health_check():
     return {
@@ -290,6 +344,7 @@ async def get_system_status():
                 "pattern3": pattern_tracker.enhanced_engine.pattern_stats['pattern3'].accuracy,
             },
         },
+        "ml": pattern_tracker.ml_engine.get_ml_status(),
         "last_error": system_stats['last_error'],
         "current_game": pattern_tracker.current_game,
     }
@@ -300,7 +355,7 @@ async def get_current_patterns():
         patterns = pattern_tracker.enhanced_engine.get_pattern_dashboard_data()
         prediction = None
         if pattern_tracker.current_game:
-            prediction = pattern_tracker.enhanced_engine.predict_rug_timing(
+            prediction = pattern_tracker.ml_engine.predict_rug_timing(
                 pattern_tracker.current_game.get('currentTick', 0),
                 pattern_tracker.current_game.get('currentPrice', 1.0),
                 pattern_tracker.current_game.get('peak_price', 1.0)
@@ -308,6 +363,7 @@ async def get_current_patterns():
         return {
             "patterns": patterns,
             "prediction": prediction,
+            "ml_status": pattern_tracker.ml_engine.get_ml_status(),
             "current_game": pattern_tracker.current_game,
             "timestamp": datetime.now().isoformat(),
         }
@@ -376,7 +432,6 @@ async def get_metrics():
         },
     }
 
-# Graceful shutdown for Mongo
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
