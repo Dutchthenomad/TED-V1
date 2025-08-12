@@ -65,6 +65,7 @@ const TreasuryPatternDashboard = () => {
           if (data.side_bet_recommendation !== undefined) setSideBet(data.side_bet_recommendation);
           if (data.side_bet_performance) setSideBetPerf(data.side_bet_performance);
           if (data.version) setVersion(data.version);
+          if (data.system_status) setWsSystemStatus(data.system_status);
           setLastPayload(data);
           setLastUpdate(new Date());
           setConnectionStats(prev => ({ ...prev, totalUpdates: prev.totalUpdates + 1 }));
