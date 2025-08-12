@@ -602,7 +602,7 @@ async def get_system_status():
             "rugs_backend": bool(rugs_client and rugs_client.connected),
             "frontend_clients": len(connected_clients),
             "total_connections": system_stats['total_connections'],
-            "reconnect_attempts": rugs_client.reconnect_attempts,
+            "reconnect_attempts": (rugs_client.reconnect_attempts if rugs_client else 0),
         },
         "statistics": {
             "total_game_updates": system_stats['total_game_updates'],
