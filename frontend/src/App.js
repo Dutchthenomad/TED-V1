@@ -290,6 +290,12 @@ const TreasuryPatternDashboard = () => {
                 const count = usable.length;
                 if (count === 0) return '—';
                 const sum = usable.reduce((acc, r) => acc + Number(r.diff), 0);
+                return Math.round(sum / count);
+              })()}
+            </div>
+            <div className="text-[10px] text-gray-500 mt-1">Average absolute difference in ticks</div>
+          </div>
+        </div>
         <div className="col-span-4 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
           <div className="text-xs font-semibold mb-2">System Health</div>
           <div className="grid grid-cols-2 gap-2 pr-1">
