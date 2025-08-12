@@ -63,7 +63,7 @@ class GamePatternAnalyzer:
         }
     
     def analyze_game_state(self, game_state: Dict, pattern_states: Dict, 
-                          game_history: List) -&gt; GameAwareFeatures:
+                          game_history: List) -> GameAwareFeatures:
         """Extract game-aware features from current state"""
         features = GameAwareFeatures()
         
