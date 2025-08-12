@@ -39,6 +39,11 @@ const TreasuryPatternDashboard = () => {
   const [avgEndWindow, setAvgEndWindow] = useState(20); // Average End Price window (default 20)
   const [avgDiffWindow, setAvgDiffWindow] = useState(20); // Average Diff window (default 20)
 
+  // Monitoring and REST-enhanced state
+  const [wsSystemStatus, setWsSystemStatus] = useState(null);
+  const [restStatus, setRestStatus] = useState(null);
+  const [restMetrics, setRestMetrics] = useState(null);
+
   const getBackendBase = () => {
     const base = process.env.REACT_APP_BACKEND_URL || '';
     return base.replace(/^http/i, 'ws');
