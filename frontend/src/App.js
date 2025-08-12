@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { TrendingUp, Clock, Target, Wifi, WifiOff } from 'lucide-react';
+import SideBetPanel from './SideBetPanel';
 
 const CompactValue = ({ label, value, accent }) => (
   <div className="flex flex-col leading-tight min-w-0">
@@ -22,6 +23,8 @@ const TreasuryPatternDashboard = () => {
   const [predictionHistory, setPredictionHistory] = useState([]);
   const [connectionStats, setConnectionStats] = useState({ totalUpdates: 0, lastError: null, uptime: 0 });
   const [lastPayload, setLastPayload] = useState(null);
+  const [sideBet, setSideBet] = useState(null);
+  const [sideBetPerf, setSideBetPerf] = useState(null);
 
   const getBackendBase = () => {
     const base = process.env.REACT_APP_BACKEND_URL || '';
@@ -41,6 +44,8 @@ const TreasuryPatternDashboard = () => {
           if (data.prediction) setRugPrediction(data.prediction);
           if (data.ml_status) setMlStatus(data.ml_status);
           if (data.prediction_history) setPredictionHistory(data.prediction_history);
+          if (data.side_bet_recommendation !== undefined) setSideBet(data.side_bet_recommendation);
+          if (data.side_bet_performance) setSideBetPerf(data.side_bet_performance);
           setLastPayload(data);
           setLastUpdate(new Date());
           setConnectionStats(prev => ({ ...prev, totalUpdates: prev.totalUpdates + 1 }));
@@ -137,14 +142,12 @@ const TreasuryPatternDashboard = () => {
         <div className="col-span-4 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
           <div className="text-xs font-semibold mb-2">ML Insights</div>
           <div className="grid grid-cols-2 gap-2 text-xs">
-            {rugPrediction?.ml_enhancement ? (
+            {rugPrediction ? (
               <>
-                <CompactValue label="ML Pred" value={Math.round(rugPrediction.ml_enhancement.ml_prediction)} />
-                <CompactValue label="Base Pred" value={rugPrediction.ml_enhancement.base_prediction} />
-                <CompactValue label="ML Weight" value={(rugPrediction.ml_enhancement.ml_weight * 100).toFixed(0) + '%'} />
-                <CompactValue label="Adj (P/D/T)" value={`${Math.round(rugPrediction.ml_enhancement.pattern_adjustments || 0)}/${Math.round(rugPrediction.ml_enhancement.duration_adjustment || 0)}/${Math.round(rugPrediction.ml_enhancement.treasury_adjustment || 0)}`} />
-                <CompactValue label="Accuracy" value={`${((mlStatus?.learning_engine?.overall_accuracy || 0) * 100).toFixed(0)}%`} />
-                <CompactValue label="LR" value={(mlStatus?.learning_engine?.current_learning_rate || 0).toFixed(3)} />
+                <CompactValue label="Confidence" value={`${((rugPrediction.confidence || 0) * 100).toFixed(0)}%`} />
+                <CompactValue label="Accuracy" value={`${((mlStatus?.performance?.accuracy || 0) * 100).toFixed(0)}%`} />
+                <CompactValue label="Patterns" value={(rugPrediction?.based_on_patterns || []).slice(0,2).join(', ') || '—'} />
+                <CompactValue label="Drought x" value={rugPrediction?.game_features?.drought_multiplier || patterns?.pattern3?.drought_multiplier || 1.0} />
               </>
             ) : (
               <span className="text-[10px] text-gray-400">Awaiting ML data…</span>
@@ -172,11 +175,15 @@ const TreasuryPatternDashboard = () => {
         </div>
 
         <div className="col-span-3 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden flex flex-col">
-          <div className="text-xs font-semibold mb-2">Weights & System</div>
+          <div className="text-xs font-semibold mb-2">Weights &amp; System</div>
           <div className="min-h-0 overflow-auto grid grid-cols-2 gap-2 text-xs pr-1">
-            {mlStatus?.learning_engine?.feature_weights && Object.entries(mlStatus.learning_engine.feature_weights).map(([k, v]) => (
-              <div key={k} className="flex justify-between gap-2"><span className="truncate">{k}</span><span className="text-gray-300 whitespace-nowrap">{Number(v).toFixed(2)}</span></div>
-            ))}
+            {mlStatus?.learning_engine?.feature_weights ? (
+              Object.entries(mlStatus.learning_engine.feature_weights).map(([k, v]) => (
+                <div key={k} className="flex justify-between gap-2"><span className="truncate">{k}</span><span className="text-gray-300 whitespace-nowrap">{Number(v).toFixed(2)}</span></div>
+              ))
+            ) : (
+              <div className="text-[10px] text-gray-500">No weights available</div>
+            )}
           </div>
           <div className="mt-2 text-[10px] text-gray-400 truncate">Errors: {mlStatus?.system_health?.errors || 0} • Last: {mlStatus?.system_health?.last_error || '—'}</div>
         </div>
@@ -215,7 +222,10 @@ const TreasuryPatternDashboard = () => {
         </div>
 
         {/* Row 3 */}
-        <div className="col-span-12 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
+        <div className="col-span-4 min-h-0 overflow-hidden">
+          <SideBetPanel sideBet={sideBet} performance={sideBetPerf} />
+        </div>
+        <div className="col-span-8 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
           <div className="text-xs font-semibold mb-2 flex items-center"><Clock className="w-4 h-4 mr-1" /> Live Payload</div>
           <div className="max-h-32 overflow-auto">
             <pre className="text-[10px] whitespace-pre-wrap break-words break-all text-gray-300">{lastPayload ? JSON.stringify(lastPayload, null, 2) : 'Waiting for data…'}</pre>
