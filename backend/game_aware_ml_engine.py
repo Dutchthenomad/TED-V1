@@ -75,7 +75,7 @@ class GamePatternAnalyzer:
         # Pattern 1 analysis
         pattern1 = pattern_states.get('pattern1', {})
         features.games_since_max_payout = pattern1.get('games_since_max_payout', 999)
-        features.is_post_max_payout = features.games_since_max_payout &lt;= 1
+        features.is_post_max_payout = features.games_since_max_payout <= 1
         if features.is_post_max_payout:
             features.expected_duration_multiplier = 1.244  # 24.4% longer
         
