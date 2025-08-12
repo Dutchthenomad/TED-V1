@@ -55,7 +55,7 @@ const TreasuryPatternDashboard = () => {
 
   const connectWebSocket = () => {
     try {
-      const wsUrl = `${getBackendBase()}/api/ws`;
+      const wsUrl = `${getBackendBaseWs()}/api/ws`;
       wsRef.current = new WebSocket(wsUrl);
       wsRef.current.onopen = () => { setIsConnected(true); setConnectionStats(prev => ({ ...prev, lastError: null })); };
       wsRef.current.onmessage = (event) => {
