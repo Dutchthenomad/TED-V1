@@ -44,10 +44,14 @@ const TreasuryPatternDashboard = () => {
   const [restStatus, setRestStatus] = useState(null);
   const [restMetrics, setRestMetrics] = useState(null);
 
-  const getBackendBase = () => {
+  const getBackendBaseHttp = () => {
+    return process.env.REACT_APP_BACKEND_URL || '';
+  };
+  const getBackendBaseWs = () => {
     const base = process.env.REACT_APP_BACKEND_URL || '';
     return base.replace(/^http/i, 'ws');
   };
+
 
   const connectWebSocket = () => {
     try {
