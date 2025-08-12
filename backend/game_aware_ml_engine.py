@@ -75,7 +75,7 @@ class GameAwareLearningState:
     correct_predictions: int = 0
 
     def update_accuracy(self, prediction: float, actual: float, tolerance: float = 50.0):
-        is_correct = abs(prediction - actual) &lt;= tolerance
+        is_correct = abs(prediction - actual) <= tolerance
         self.prediction_history.append({
             'prediction': prediction,
             'actual': actual,
@@ -87,14 +87,14 @@ class GameAwareLearningState:
         self.total_predictions += 1
         if is_correct:
             self.correct_predictions += 1
-        if len(self.accuracy_window) &gt;= 20:
+        if len(self.accuracy_window) >= 20:
             recent_accuracy = sum(self.accuracy_window) / len(self.accuracy_window)
-            if recent_accuracy &gt; 0.75:
+            if recent_accuracy > 0.75:
                 self.learning_rate = min(0.03, self.learning_rate * 1.02)
-            elif recent_accuracy &lt; 0.55:
+            elif recent_accuracy < 0.55:
                 self.learning_rate = max(0.01, self.learning_rate * 0.98)
 
-    def get_accuracy(self) -&gt; float:
+    def get_accuracy(self) -> float:
         if self.total_predictions == 0:
             return 0.6
         return self.correct_predictions / self.total_predictions
@@ -118,14 +118,14 @@ class GameSpecificFeatureExtractor:
     def update_game_state(self, tick: int, multiplier: float, timestamp: datetime):
         self.tick_progression_tracker.append({'tick': tick, 'multiplier': multiplier, 'timestamp': timestamp})
         self.multiplier_history.append(multiplier)
-        if len(self.multiplier_history) &gt;= 5:
+        if len(self.multiplier_history) >= 5:
             recent_mult = list(self.multiplier_history)[-5:]
             acceleration = (recent_mult[-1] - recent_mult[0]) / 5.0
         else:
             acceleration = 0.0
         return acceleration
 
-    def extract_features(self, current_game_state: Dict, pattern_states: Dict, game_history: List) -&gt; GameSpecificFeatures:
+    def extract_features(self, current_game_state: Dict, pattern_states: Dict, game_history: List) -> GameSpecificFeatures:
         try:
             features = GameSpecificFeatures()
             current_tick = current_game_state.get('currentTick', 0)
@@ -134,11 +134,11 @@ class GameSpecificFeatureExtractor:
             features.current_tick = current_tick
             features.current_multiplier = current_price
             features.peak_multiplier = peak_price
-            features.multiplier_vs_peak_ratio = current_price / peak_price if peak_price &gt; 0 else 1.0
+            features.multiplier_vs_peak_ratio = current_price / peak_price if peak_price > 0 else 1.0
             pattern1_state = pattern_states.get('pattern1', {})
             features.pattern1_games_since = pattern1_state.get('games_since_trigger', 999) or 999
             features.pattern1_trigger_distance = abs(current_price - self.PATTERN1_TRIGGER)
-            if features.pattern1_games_since &lt;= 3:
+            if features.pattern1_games_since <= 3:
                 features.pattern1_recovery_probability = 0.211
             else:
                 features.pattern1_recovery_probability = 0.122
@@ -174,44 +174,44 @@ class GameSpecificFeatureExtractor:
             logger.error(f"Error extracting game-specific features: {e}")
             return GameSpecificFeatures()
 
-    def _calculate_clustering_factor(self, game_history: List) -&gt; float:
-        if len(game_history) &lt; 10:
+    def _calculate_clustering_factor(self, game_history: List) -> float:
+        if len(game_history) < 10:
             return 1.0
         recent_games = game_history[-10:]
         ultra_short_count = sum(1 for game in recent_games if getattr(game, 'is_ultra_short', False))
-        if ultra_short_count &gt;= 3:
+        if ultra_short_count >= 3:
             return 2.0
-        elif ultra_short_count &gt;= 2:
+        elif ultra_short_count >= 2:
             return 1.5
-        elif ultra_short_count &gt;= 1:
+        elif ultra_short_count >= 1:
             return 1.2
         else:
             return 1.0
 
-    def _calculate_tick_percentile(self, current_tick: int, game_history: List) -&gt; float:
+    def _calculate_tick_percentile(self, current_tick: int, game_history: List) -> float:
         if not game_history:
             return 0.5
         final_ticks = [getattr(game, 'final_tick', 0) for game in game_history[-100:]]
-        final_ticks = [t for t in final_ticks if t &gt; 0]
+        final_ticks = [t for t in final_ticks if t > 0]
         if not final_ticks:
             return 0.5
-        below_count = sum(1 for t in final_ticks if t &lt; current_tick)
+        below_count = sum(1 for t in final_ticks if t < current_tick)
         return below_count / len(final_ticks)
 
-    def _classify_duration(self, current_tick: int) -&gt; str:
-        if current_tick &lt;= 10:
+    def _classify_duration(self, current_tick: int) -> str:
+        if current_tick <= 10:
             return "ultra_short"
-        elif current_tick &lt;= 50:
+        elif current_tick <= 50:
             return "short"
-        elif current_tick &lt;= 200:
+        elif current_tick <= 200:
             return "normal"
-        elif current_tick &lt;= 500:
+        elif current_tick <= 500:
             return "extended"
         else:
             return "moonshot"
 
-    def _estimate_treasury_pressure(self, game_history: List) -&gt; float:
-        if len(game_history) &lt; 10:
+    def _estimate_treasury_pressure(self, game_history: List) -> float:
+        if len(game_history) < 10:
             return 0.5
         recent_games = game_history[-10:]
         max_payout_count = sum(1 for g in recent_games if getattr(g, 'is_max_payout', False))
@@ -219,14 +219,14 @@ class GameSpecificFeatureExtractor:
         pressure = (max_payout_count * 0.1 + moonshot_count * 0.15) / len(recent_games)
         return max(0.0, min(1.0, pressure + 0.5))
 
-    def _calculate_recent_frequency(self, game_history: List, condition_func, window: int) -&gt; float:
-        if len(game_history) &lt; window:
+    def _calculate_recent_frequency(self, game_history: List, condition_func, window: int) -> float:
+        if len(game_history) < window:
             return 0.0
         recent_games = game_history[-window:]
         matching_count = sum(1 for game in recent_games if condition_func(game))
         return matching_count / len(recent_games)
 
-    def _count_active_patterns(self, pattern_states: Dict) -&gt; int:
+    def _count_active_patterns(self, pattern_states: Dict) -> int:
         active_count = 0
         if pattern_states.get('pattern1', {}).get('status') in ['TRIGGERED', 'MONITORING']:
             active_count += 1
@@ -236,26 +236,26 @@ class GameSpecificFeatureExtractor:
             active_count += 1
         return active_count
 
-    def _analyze_trajectory(self) -&gt; str:
-        if len(self.multiplier_history) &lt; 5:
+    def _analyze_trajectory(self) -> str:
+        if len(self.multiplier_history) < 5:
             return "rising"
         recent = list(self.multiplier_history)[-5:]
-        if recent[-1] &gt; recent[0] * 1.05:
+        if recent[-1] > recent[0] * 1.05:
             return "rising"
-        elif recent[-1] &lt; recent[0] * 0.95:
+        elif recent[-1] < recent[0] * 0.95:
             return "declining"
         else:
             return "plateau"
 
-    def _calculate_time_at_level(self) -&gt; int:
-        if len(self.multiplier_history) &lt; 3:
+    def _calculate_time_at_level(self) -> int:
+        if len(self.multiplier_history) < 3:
             return 0
         current_mult = self.multiplier_history[-1]
         time_at_level = 0
         for mult in reversed(list(self.multiplier_history)):
             if current_mult == 0:
                 break
-            if abs(mult - current_mult) / max(current_mult, 1e-9) &lt; 0.1:
+            if abs(mult - current_mult) / max(current_mult, 1e-9) < 0.1:
                 time_at_level += 1
             else:
                 break
@@ -263,30 +263,30 @@ class GameSpecificFeatureExtractor:
 
 class UltraShortClassifier:
     """
-    Lightweight online logistic classifier to predict ultra-short risk (Actual tick &lt;= 10).
+    Lightweight online logistic classifier to predict ultra-short risk (Actual tick <= 10).
     Uses game-aware features only available up to the current tick.
     """
     def __init__(self, learning_rate: float = 0.05, threshold: float = 0.6):
         self.learning_rate = learning_rate
         self.threshold = threshold
-        self.weights = {}  # feature_name -&gt; weight
+        self.weights = {}  # feature_name -> weight
         self.bias = 0.0
         self.history = []
         self.accuracy_window = []  # last 100 labels correctness
 
-    def _sigmoid(self, z: float) -&gt; float:
-        if z &gt; 20:
+    def _sigmoid(self, z: float) -> float:
+        if z > 20:
             return 1.0
-        if z &lt; -20:
+        if z < -20:
             return 0.0
         return 1.0 / (1.0 + (2.718281828459045 ** (-z)))
 
-    def _features_dict(self, f: GameSpecificFeatures) -&gt; dict:
+    def _features_dict(self, f: GameSpecificFeatures) -> dict:
         # Core signals that correlate with ultra-short risk
         return {
-            "tick_lt_10": 1.0 if f.current_tick &lt; 10 else 0.0,
-            "tick_lt_20": 1.0 if f.current_tick &lt; 20 else 0.0,
-            "mult_lt_2": 1.0 if f.current_multiplier &lt; 2.0 else 0.0,
+            "tick_lt_10": 1.0 if f.current_tick < 10 else 0.0,
+            "tick_lt_20": 1.0 if f.current_tick < 20 else 0.0,
+            "mult_lt_2": 1.0 if f.current_multiplier < 2.0 else 0.0,
             "tick_percentile": float(f.tick_percentile_vs_history),
             "p2_cluster": float(f.pattern2_clustering_factor),
             "p2_ultra_prob": float(f.pattern2_ultra_short_probability),
@@ -295,7 +295,7 @@ class UltraShortClassifier:
             "mult_vs_peak": float(f.multiplier_vs_peak_ratio),
         }
 
-    def predict_proba(self, features: GameSpecificFeatures) -&gt; float:
+    def predict_proba(self, features: GameSpecificFeatures) -> float:
         x = self._features_dict(features)
         z = self.bias
         for k in x.keys():
@@ -307,7 +307,7 @@ class UltraShortClassifier:
 
     def update(self, features: GameSpecificFeatures, label: int):
         """
-        label: 1 if ultra-short (&lt;=10), else 0
+        label: 1 if ultra-short (<=10), else 0
         """
         x = self._features_dict(features)
         # forward
@@ -319,16 +319,16 @@ class UltraShortClassifier:
             self.weights[k] = self.weights.get(k, 0.0) + self.learning_rate * error * v
         self.bias += self.learning_rate * error
         # Track basic accuracy
-        pred_label = 1 if p &gt;= self.threshold else 0
+        pred_label = 1 if p >= self.threshold else 0
         correct = int(pred_label == label)
         self.accuracy_window.append(correct)
-        if len(self.accuracy_window) &gt; 100:
+        if len(self.accuracy_window) > 100:
             self.accuracy_window = self.accuracy_window[-100:]
         self.history.append({"p": float(p), "label": int(label)})
-        if len(self.history) &gt; 200:
+        if len(self.history) > 200:
             self.history = self.history[-200:]
 
-    def get_status(self) -&gt; dict:
+    def get_status(self) -> dict:
         recent_acc = sum(self.accuracy_window) / len(self.accuracy_window) if self.accuracy_window else 0.0
         return {
             "threshold": self.threshold,
@@ -345,7 +345,7 @@ class GameAwareLearningEngine:
         self.performance_tracker = deque(maxlen=200)
         self.pattern_correlation_tracker = {}
 
-    def predict_with_features(self, features: GameSpecificFeatures, base_predictions: Dict[str, float]) -&gt; Dict[str, Any]:
+    def predict_with_features(self, features: GameSpecificFeatures, base_predictions: Dict[str, float]) -> Dict[str, Any]:
         try:
             pattern_adjustments = self._calculate_pattern_adjustments(features)
             duration_adjustment = self._calculate_duration_adjustment(features)
@@ -356,7 +356,7 @@ class GameAwareLearningEngine:
                 weight = self.state.feature_weights.get(f"{pattern_id}_weight", 1.0)
                 weighted_prediction += prediction * weight
                 total_weight += weight
-            if total_weight &gt; 0:
+            if total_weight > 0:
                 weighted_prediction /= total_weight
             ml_prediction = weighted_prediction + pattern_adjustments + duration_adjustment + treasury_adjustment
             confidence = self._calculate_game_confidence(features)
@@ -382,22 +382,22 @@ class GameAwareLearningEngine:
                 'fallback_used': True
             }
 
-    def _calculate_pattern_adjustments(self, features: GameSpecificFeatures) -&gt; float:
+    def _calculate_pattern_adjustments(self, features: GameSpecificFeatures) -> float:
         adjustment = 0.0
         # Early-game rug suppression: strong negative bias when little progress
-        if features.current_tick &lt; 20 and features.current_multiplier &lt; 2.0:
+        if features.current_tick < 20 and features.current_multiplier < 2.0:
             adjustment -= 150
-        elif features.current_tick &lt; 10:
+        elif features.current_tick < 10:
             adjustment -= 120
-        if features.pattern1_games_since &lt;= 3:
+        if features.pattern1_games_since <= 3:
             adjustment += 50 * (4 - features.pattern1_games_since) / 4
-        if features.pattern2_clustering_factor &gt; 1.0:
+        if features.pattern2_clustering_factor > 1.0:
             ultra_short_boost = (features.pattern2_clustering_factor - 1.0) * -100
             adjustment += ultra_short_boost
-        if features.current_multiplier &gt;= 8:
-            if features.current_multiplier &gt;= 20:
+        if features.current_multiplier >= 8:
+            if features.current_multiplier >= 20:
                 adjustment += 100
-            elif features.current_multiplier &gt;= 12:
+            elif features.current_multiplier >= 12:
                 adjustment += 50
             else:
                 adjustment += 30
@@ -405,48 +405,48 @@ class GameAwareLearningEngine:
         adjustment += drought_bonus
         return adjustment
 
-    def _calculate_duration_adjustment(self, features: GameSpecificFeatures) -&gt; float:
+    def _calculate_duration_adjustment(self, features: GameSpecificFeatures) -> float:
         adjustment = 0.0
         # Penalize predictions when very early in the game
-        if features.current_tick &lt; 10:
+        if features.current_tick < 10:
             adjustment -= 100
-        if features.tick_percentile_vs_history &gt; 0.8:
+        if features.tick_percentile_vs_history > 0.8:
             adjustment += 20
-        elif features.tick_percentile_vs_history &lt; 0.2:
+        elif features.tick_percentile_vs_history < 0.2:
             adjustment -= 20
-        if features.cumulative_survival_probability &lt; 0.3:
+        if features.cumulative_survival_probability < 0.3:
             adjustment -= 30
-        elif features.cumulative_survival_probability &gt; 0.8:
+        elif features.cumulative_survival_probability > 0.8:
             adjustment += 10
         return adjustment
 
-    def _calculate_treasury_adjustment(self, features: GameSpecificFeatures) -&gt; float:
+    def _calculate_treasury_adjustment(self, features: GameSpecificFeatures) -> float:
         adjustment = 0.0
         pressure_adjustment = (features.treasury_pressure_estimate - 0.5) * -40
         adjustment += pressure_adjustment
-        if features.recent_max_payout_frequency &gt; 0.3:
+        if features.recent_max_payout_frequency > 0.3:
             adjustment -= 25
-        if features.recent_moonshot_frequency &gt; 0.2:
+        if features.recent_moonshot_frequency > 0.2:
             adjustment -= 35
         return adjustment
 
-    def _calculate_game_confidence(self, features: GameSpecificFeatures) -&gt; float:
+    def _calculate_game_confidence(self, features: GameSpecificFeatures) -> float:
         confidence = 0.6
-        if features.pattern1_games_since &lt;= 2:
+        if features.pattern1_games_since <= 2:
             confidence += 0.1
-        if features.pattern2_clustering_factor &gt; 1.5:
+        if features.pattern2_clustering_factor > 1.5:
             confidence += 0.05
-        if features.current_multiplier &gt;= 12:
+        if features.current_multiplier >= 12:
             confidence += 0.15
-        if features.tick_percentile_vs_history &gt; 0.9 or features.tick_percentile_vs_history &lt; 0.1:
+        if features.tick_percentile_vs_history > 0.9 or features.tick_percentile_vs_history < 0.1:
             confidence += 0.1
-        if features.treasury_pressure_estimate &gt; 0.7 or features.treasury_pressure_estimate &lt; 0.3:
+        if features.treasury_pressure_estimate > 0.7 or features.treasury_pressure_estimate < 0.3:
             confidence += 0.05
-        if features.consecutive_pattern_count &gt;= 2:
+        if features.consecutive_pattern_count >= 2:
             confidence += 0.1
         return max(0.1, min(0.95, confidence))
 
-    def _get_key_features(self, features: GameSpecificFeatures) -&gt; Dict[str, float]:
+    def _get_key_features(self, features: GameSpecificFeatures) -> Dict[str, float]:
         return {
             'pattern1_games_since': features.pattern1_games_since,
             'pattern2_clustering': features.pattern2_clustering_factor,
@@ -464,14 +464,14 @@ class GameAwareLearningEngine:
             self.state.update_accuracy(prediction, actual_outcome, tolerance)
             raw_error = prediction - actual_outcome
             error = abs(raw_error)
-            is_correct = error &lt;= tolerance
+            is_correct = error <= tolerance
             learning_rate = self.state.learning_rate
             # Asymmetric penalty: overshoots hurt more
-            penalty = error * (1.5 if raw_error &gt; 0 else 1.0)
+            penalty = error * (1.5 if raw_error > 0 else 1.0)
             if 'pattern_adjustments' in prediction_result:
                 pattern_adj = prediction_result['pattern_adjustments']
                 # reward/penalize based on alignment with outcome, scaled by asymmetric penalty
-                if (pattern_adj &gt; 0 and actual_outcome &gt; prediction) or (pattern_adj &lt; 0 and actual_outcome &lt; prediction):
+                if (pattern_adj > 0 and actual_outcome > prediction) or (pattern_adj < 0 and actual_outcome < prediction):
                     self.state.feature_weights['pattern1_distance'] = min(0.5, self.state.feature_weights['pattern1_distance'] + learning_rate * 0.02)
                 else:
                     self.state.feature_weights['pattern1_distance'] = max(0.1, self.state.feature_weights['pattern1_distance'] - learning_rate * (0.01 + penalty/10000.0))
@@ -487,7 +487,7 @@ class GameAwareLearningEngine:
         except Exception as e:
             logger.error(f"Error updating game-aware weights: {e}")
 
-    def get_performance_metrics(self) -&gt; Dict:
+    def get_performance_metrics(self) -> Dict:
         return {
             'overall_accuracy': self.state.get_accuracy(),
             'recent_accuracy': sum(self.state.accuracy_window) / len(self.state.accuracy_window) if self.state.accuracy_window else 0.0,
@@ -522,7 +522,7 @@ class GameAwareMLPatternEngine:
         self.base_engine.update_current_game(tick, price)
         self.feature_extractor.update_game_state(tick, price, datetime.now())
 
-    def predict_rug_timing(self, current_tick: int, current_price: float, peak_price: float) -&gt; Dict:
+    def predict_rug_timing(self, current_tick: int, current_price: float, peak_price: float) -> Dict:
         try:
             base_prediction = self.base_engine.predict_rug_timing(current_tick, current_price, peak_price)
             if not self.ml_enabled:
@@ -533,14 +533,14 @@ class GameAwareMLPatternEngine:
             game_history = self.base_engine.game_history
             features = self.feature_extractor.extract_features(current_game_state, pattern_states, game_history)
             self._last_features = features
-            # Ultra-short probability (\u2264=10 ticks)
+            # Ultra-short probability (<=10 ticks)
             p_ultra = self.ultra_short.predict_proba(features)
             # Base predictions assembled from known contexts
             base_predictions = {
                 'statistical': base_prediction.get('predicted_tick', 200),
                 'pattern1': current_tick + 55 if pattern_states.get('pattern1', {}).get('status') == 'TRIGGERED' else current_tick + 25,
-                'pattern2': 8 if features.pattern2_clustering_factor &gt; 1.5 else current_tick + 30,
-                'pattern3': int(current_tick * 1.2) if current_price &gt;= 8 else current_tick + 20
+                'pattern2': 8 if features.pattern2_clustering_factor > 1.5 else current_tick + 30,
+                'pattern3': int(current_tick * 1.2) if current_price >= 8 else current_tick + 20
             }
             ml_result = self.learning_engine.predict_with_features(features, base_predictions)
             ml_accuracy = self.learning_engine.state.get_accuracy()
@@ -549,7 +549,7 @@ class GameAwareMLPatternEngine:
             combined_prediction = (ml_result['prediction'] * ml_weight + base_prediction['predicted_tick'] * base_weight)
             # Apply early-game ultra-short gate
             gate_applied = False
-            if p_ultra &gt;= self.ultra_short.threshold and current_tick &lt; 25:
+            if p_ultra >= self.ultra_short.threshold and current_tick < 25:
                 gated = min(combined_prediction, min(10, current_tick + 5))
                 if gated != combined_prediction:
                     combined_prediction = gated
@@ -596,12 +596,12 @@ class GameAwareMLPatternEngine:
                     'actual': actual_tick,
                     'game_id': completed_game.game_id
                 })
-                if len(self.performance_comparison['ml_predictions']) &gt; 100:
+                if len(self.performance_comparison['ml_predictions']) > 100:
                     self.performance_comparison['ml_predictions'] = self.performance_comparison['ml_predictions'][-100:]
                 self._update_performance_comparison()
             # Update ultra-short classifier label using last features
             if self._last_features is not None:
-                label = 1 if completed_game.final_tick &lt;= 10 else 0
+                label = 1 if completed_game.final_tick <= 10 else 0
                 try:
                     self.ultra_short.update(self._last_features, label)
                 except Exception as e:
@@ -614,14 +614,14 @@ class GameAwareMLPatternEngine:
     def _update_performance_comparison(self):
         try:
             ml_preds = self.performance_comparison['ml_predictions'][-50:]
-            if len(ml_preds) &gt;= 10:
-                ml_correct = sum(1 for p in ml_preds if abs(p['predicted'] - p['actual']) &lt;= 50)
+            if len(ml_preds) >= 10:
+                ml_correct = sum(1 for p in ml_preds if abs(p['predicted'] - p['actual']) <= 50)
                 self.performance_comparison['ml_accuracy'] = ml_correct / len(ml_preds)
                 logger.info(f"📊 Game-aware ML Performance: {self.performance_comparison['ml_accuracy']:.3f} accuracy over {len(ml_preds)} predictions")
         except Exception as e:
             logger.error(f"Error updating performance comparison: {e}")
 
-    def get_ml_status(self) -&gt; Dict:
+    def get_ml_status(self) -> Dict:
         perf = self.learning_engine.get_performance_metrics()
         return {
             'ml_enabled': self.ml_enabled,
