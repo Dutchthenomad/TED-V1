@@ -290,6 +290,34 @@ const TreasuryPatternDashboard = () => {
                 const count = usable.length;
                 if (count === 0) return '—';
                 const sum = usable.reduce((acc, r) => acc + Number(r.diff), 0);
+        <div className="col-span-4 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
+          <div className="text-xs font-semibold mb-2">System Health</div>
+          <div className="grid grid-cols-2 gap-2 pr-1">
+            <StatLine label="Status" value={
+              restStatus?.system?.status || wsSystemStatus?.status || '—'
+            } accent={
+              (restStatus?.system?.status || wsSystemStatus?.status) === 'healthy' ? 'text-green-400' : 'text-yellow-400'
+            } />
+            <StatLine label="Uptime" value={
+              restStatus?.system?.uptime_seconds !== undefined
+                ? `${restStatus.system.uptime_seconds}s`
+                : (connectionStats?.uptime || 0) + 's'
+            } />
+            <StatLine label="CPU" value={
+              `${Math.round(restMetrics?.metrics?.cpu_percent || 0)}%`
+            } />
+            <StatLine label="Memory" value={
+              restMetrics?.metrics?.memory_usage_mb ? `${Math.round(restMetrics.metrics.memory_usage_mb)} MB` : '—'
+            } />
+            <StatLine label="Games Processed" value={
+              restStatus?.statistics?.games_analyzed || restStatus?.statistics?.games_processed || 0
+            } />
+            <StatLine label="Errors (total)" value={
+              restStatus?.statistics?.total_errors || restStatus?.statistics?.errors_count || 0
+            } />
+          </div>
+        </div>
+
                 return Math.round(sum / count);
               })()}
             </div>
