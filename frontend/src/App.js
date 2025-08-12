@@ -343,8 +343,8 @@ const TreasuryPatternDashboard = () => {
 
         {/* Row 3 */}
         <div className="col-span-4 min-h-0 overflow-hidden">
-          {/* SideBetPanel hidden until recommendation is available */}
-          <SideBetPanel sideBet={sideBet} performance={sideBetPerf} />
+          {/* SideBetPanel: sticky per game with captured tick label */}
+          <SideBetPanel sideBet={stickySideBet?.data} performance={sideBetPerf} capturedTick={stickySideBet?.tick} capturedAt={stickySideBet?.timestamp} />
         </div>
         <div className="col-span-8 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
           <div className="text-xs font-semibold mb-2 flex items-center"><Clock className="w-4 h-4 mr-1" /> Live Payload</div>
