@@ -511,7 +511,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 'prediction_history': list(pattern_tracker.prediction_history)[-20:],
                 'side_bet_performance': pattern_tracker.side_bet_performance,
                 'system_status': {
-                    'rugs_connected': rugs_client.connected,
+                    'rugs_connected': bool(rugs_client and rugs_client.connected),
                     'uptime_seconds': int((datetime.now() - system_stats['start_time']).total_seconds()),
                     'total_games': len(pattern_tracker.enhanced_engine.game_history),
                     'version': '2.0.0'
