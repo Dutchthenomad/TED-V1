@@ -420,35 +420,40 @@ class RugsWebSocketClient:
             await self.sio.disconnect()
             self.connected = False
 
-# Initialize Rugs client
-rugs_client = RugsWebSocketClient()
+# Initialize Rugs client (can be disabled by env)
+rugs_client = None
+EXTERNAL_FEED_ENABLED = os.getenv('EXTERNAL_FEED_ENABLED', os.getenv('DISABLE_EXTERNAL_RUGS', 'false')).lower() in ['1','true','yes']
+if EXTERNAL_FEED_ENABLED:
+    rugs_client = RugsWebSocketClient()
 
 @app.on_event("startup")
 async def startup_event():
     logger.info("🚀 Starting Rugs Pattern Tracker v2.0.0 - Clean Architecture")
     
-    # Connection manager task
-    async def connection_manager():
-        while True:
-            if not rugs_client.connected and rugs_client.reconnect_attempts < rugs_client.max_reconnect_attempts:
-                logger.info(f"🔄 Attempting to connect to Rugs.fun (attempt {rugs_client.reconnect_attempts + 1})")
-                success = await rugs_client.connect_to_rugs()
-                
-                if not success:
-                    delay = min(rugs_client.reconnect_delay * (2 ** rugs_client.reconnect_attempts), 60)
-                    logger.info(f"⏳ Retrying in {delay} seconds...")
-                    await asyncio.sleep(delay)
-                else:
-                    logger.info("✅ Successfully connected to Rugs.fun")
+    # Connection manager task (only if external feed enabled)
+    if rugs_client is not None:
+        async def connection_manager():
+            while True:
+                if not rugs_client.connected and rugs_client.reconnect_attempts < rugs_client.max_reconnect_attempts:
+                    logger.info(f"🔄 Attempting to connect to Rugs.fun (attempt {rugs_client.reconnect_attempts + 1})")
+                    success = await rugs_client.connect_to_rugs()
                     
-            elif rugs_client.reconnect_attempts >= rugs_client.max_reconnect_attempts:
-                logger.error("💀 Max reconnection attempts reached. Waiting...")
-                await asyncio.sleep(60)
-                rugs_client.reconnect_attempts = 0
-            else:
-                await asyncio.sleep(rugs_client.reconnect_delay)
-    
-    asyncio.create_task(connection_manager())
+                    if not success:
+                        delay = min(rugs_client.reconnect_delay * (2 ** rugs_client.reconnect_attempts), 60)
+                        logger.info(f"⏳ Retrying in {delay} seconds...")
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.info("✅ Successfully connected to Rugs.fun")
+                        
+                elif rugs_client.reconnect_attempts >= rugs_client.max_reconnect_attempts:
+                    logger.error("💀 Max reconnection attempts reached. Waiting...")
+                    await asyncio.sleep(60)
+                    rugs_client.reconnect_attempts = 0
+                else:
+                    await asyncio.sleep(rugs_client.reconnect_delay)
+        asyncio.create_task(connection_manager())
+    else:
+        logger.info("🛑 External Rugs backend connection disabled (EXTERNAL_FEED_ENABLED=false)")
 
 @app.on_event("shutdown")
 async def shutdown_event():
