@@ -28,7 +28,7 @@ if 'DB_NAME' in os.environ:
 else:
     # Try to extract DB name from URL, otherwise use default
     if '/' in mongo_url and mongo_url.rstrip('/').split('/')[-1]:
-        # MongoDB URLs can have format: mongodb://.../&lt;database_name&gt;
+        # MongoDB URLs can have format: mongodb://.../<database_name>
         db_name = mongo_url.rstrip('/').split('/')[-1].split('?')[0]
         if not db_name or db_name == 'test':
             db_name = 'rugs_tracker'
