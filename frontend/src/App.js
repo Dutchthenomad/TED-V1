@@ -254,13 +254,6 @@ const TreasuryPatternDashboard = () => {
           </div>
         </div>
 
-                return Math.round(sum / count);
-              })()}
-            </div>
-            <div className="text-[10px] text-gray-500 mt-1">Average absolute difference in ticks</div>
-          </div>
-        </div>
-
         <div className="col-span-4 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
           <div className="text-xs font-semibold mb-2">ML Insights</div>
           <div className="grid grid-cols-2 gap-2 text-xs">
