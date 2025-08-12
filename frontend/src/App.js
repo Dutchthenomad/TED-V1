@@ -36,7 +36,8 @@ const TreasuryPatternDashboard = () => {
   const [sideBet, setSideBet] = useState(null);
   const [sideBetPerf, setSideBetPerf] = useState(null);
   const [version, setVersion] = useState(null);
-  const [avgWindow, setAvgWindow] = useState(20); // Average End Price window (default 20)
+  const [avgEndWindow, setAvgEndWindow] = useState(20); // Average End Price window (default 20)
+  const [avgDiffWindow, setAvgDiffWindow] = useState(20); // Average Diff window (default 20)
 
   const getBackendBase = () => {
     const base = process.env.REACT_APP_BACKEND_URL || '';
