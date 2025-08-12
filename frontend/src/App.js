@@ -10,6 +10,16 @@ const CompactValue = ({ label, value, accent }) => (
   </div>
 );
 
+const ModuleBadge = ({ label, active }) => (
+  <span
+    className={`px-1.5 py-0.5 rounded text-[10px] border ${
+      active ? 'bg-green-900/40 border-green-700 text-green-300' : 'bg-gray-800 border-gray-700 text-gray-400'
+    }`}
+  >
+    {label}
+  </span>
+);
+
 const TreasuryPatternDashboard = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
@@ -25,6 +35,7 @@ const TreasuryPatternDashboard = () => {
   const [lastPayload, setLastPayload] = useState(null);
   const [sideBet, setSideBet] = useState(null);
   const [sideBetPerf, setSideBetPerf] = useState(null);
+  const [version, setVersion] = useState(null);
 
   const getBackendBase = () => {
     const base = process.env.REACT_APP_BACKEND_URL || '';
@@ -46,6 +57,7 @@ const TreasuryPatternDashboard = () => {
           if (data.prediction_history) setPredictionHistory(data.prediction_history);
           if (data.side_bet_recommendation !== undefined) setSideBet(data.side_bet_recommendation);
           if (data.side_bet_performance) setSideBetPerf(data.side_bet_performance);
+          if (data.version) setVersion(data.version);
           setLastPayload(data);
           setLastUpdate(new Date());
           setConnectionStats(prev => ({ ...prev, totalUpdates: prev.totalUpdates + 1 }));
@@ -95,6 +107,12 @@ const TreasuryPatternDashboard = () => {
     return <span className={`font-semibold ${color}`}>{diff}</span>;
   };
 
+  const bandWidth = (rugPrediction?.tolerance || 0) * 2;
+  const gateApplied = !!rugPrediction?.ml_enhancement?.ultra_short_gate_applied;
+  const gateProb = rugPrediction?.ml_enhancement?.ultra_short_prob;
+  const predictionMethod = mlStatus?.prediction_method || '—';
+  const modules = mlStatus?.modules || {};
+
   return (
     <div className="min-h-screen bg-gray-900 text-white p-2 overflow-x-hidden">
       {/* Top Bar */}
@@ -110,6 +128,7 @@ const TreasuryPatternDashboard = () => {
           <CompactValue label="Game" value={`#${gameState.gameId}`} />
           <CompactValue label="Tick" value={gameState.currentTick} />
           <CompactValue label="Price" value={`${Number(gameState.currentPrice || 0).toFixed(3)}x`} />
+          <CompactValue label="Version" value={version || '—'} />
         </div>
       </div>
 
@@ -123,12 +142,19 @@ const TreasuryPatternDashboard = () => {
             <CompactValue label="Tolerance" value={`±${rugPrediction.tolerance}`} accent="text-green-400" />
             <CompactValue label="Confidence" value={`${((rugPrediction.confidence || 0) * 100).toFixed(1)}%`} accent="text-yellow-400" />
             <CompactValue label="Remaining" value={Math.max(0, (rugPrediction.predicted_tick || 0) - (gameState.currentTick || 0))} accent="text-purple-400" />
+            <CompactValue label="Band Width" value={`${bandWidth}`} />
+            <CompactValue label="Method" value={predictionMethod} />
           </div>
-          <div className="mt-2 text-[10px] text-gray-400 truncate">Based on: {rugPrediction?.based_on_patterns?.join(', ')}</div>
+          <div className="mt-2 text-[10px] text-gray-400 truncate">
+            Based on: {rugPrediction?.based_on_patterns?.join(', ') || '—'}
+          </div>
+          <div className="mt-1 text-[10px] text-gray-400 truncate">
+            Ultra-Short Gate: {gateApplied ? <span className="text-green-400">ON{typeof gateProb === 'number' ? ` (${(gateProb * 100).toFixed(0)}%)` : ''}</span> : <span className="text-gray-400">OFF</span>}
+          </div>
         </div>
 
         <div className="col-span-5 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
-          <div className="text-xs font-semibold mb-2">Live Tracking</div>
+          <div className="text-xs font-semibold mb-2">Live Tracking <span className="text-[10px] text-gray-400 ml-1">(Conformal band)</span></div>
           <div className="relative h-5 bg-gray-700 rounded overflow-hidden">
             <div className="absolute top-0 h-full w-0.5 bg-white" style={{ left: `${Math.min(((gameState.currentTick || 0) / 600) * 100, 100)}%` }} />
             <div className="absolute top-0 h-full bg-blue-500/60" style={{ left: `${Math.min((((rugPrediction.predicted_tick || 0) - (rugPrediction.tolerance || 0)) / 600) * 100, 100)}%`, width: `${Math.min((((rugPrediction.tolerance || 0) * 2) / 600) * 100, 100)}%` }} />
@@ -153,6 +179,12 @@ const TreasuryPatternDashboard = () => {
               <span className="text-[10px] text-gray-400">Awaiting ML data…</span>
             )}
           </div>
+          <div className="mt-2 flex items-center gap-1 flex-wrap">
+            <span className="text-[10px] text-gray-400 mr-1">Modules:</span>
+            <ModuleBadge label="hazard" active={!!modules?.hazard} />
+            <ModuleBadge label="gate" active={!!modules?.gate} />
+            <ModuleBadge label="conformal" active={!!modules?.conformal} />
+          </div>
         </div>
 
         {/* Row 2 */}
@@ -175,15 +207,12 @@ const TreasuryPatternDashboard = () => {
         </div>
 
         <div className="col-span-3 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden flex flex-col">
-          <div className="text-xs font-semibold mb-2">Weights &amp; System</div>
-          <div className="min-h-0 overflow-auto grid grid-cols-2 gap-2 text-xs pr-1">
-            {mlStatus?.learning_engine?.feature_weights ? (
-              Object.entries(mlStatus.learning_engine.feature_weights).map(([k, v]) => (
-                <div key={k} className="flex justify-between gap-2"><span className="truncate">{k}</span><span className="text-gray-300 whitespace-nowrap">{Number(v).toFixed(2)}</span></div>
-              ))
-            ) : (
-              <div className="text-[10px] text-gray-500">No weights available</div>
-            )}
+          <div className="text-xs font-semibold mb-2">Performance</div>
+          <div className="grid grid-cols-2 gap-2 text-xs pr-1">
+            <CompactValue label="Accuracy" value={`${((mlStatus?.performance?.accuracy || 0) * 100).toFixed(0)}%`} />
+            <CompactValue label="Recent" value={`${((mlStatus?.performance?.recent_accuracy || 0) * 100).toFixed(0)}%`} />
+            <CompactValue label="Total Preds" value={mlStatus?.performance?.total_predictions || 0} />
+            <CompactValue label="Method" value={predictionMethod} />
           </div>
           <div className="mt-2 text-[10px] text-gray-400 truncate">Errors: {mlStatus?.system_health?.errors || 0} • Last: {mlStatus?.system_health?.last_error || '—'}</div>
         </div>
