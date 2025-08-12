@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { TrendingUp, Clock, Target, Wifi, WifiOff } from 'lucide-react';
 import SideBetPanel from './SideBetPanel';
+import { useSystemMonitoring } from './hooks/useSystemMonitoring';
 
 const CompactValue = ({ label, value, accent }) => (
   <div className="flex flex-col leading-tight min-w-0">
