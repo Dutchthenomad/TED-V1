@@ -88,49 +88,6 @@ const TreasuryPatternDashboard = () => {
       wsRef.current.onclose = () => { setIsConnected(false); reconnectTimeoutRef.current = setTimeout(() => { connectWebSocket(); }, 1500); };
     } catch (err) {
       setConnectionStats(prev => ({ ...prev, lastError: `Connection failed: ${err.message}` }));
-  // REST polling for system status and metrics (30s and 60s)
-  useEffect(() => {
-    const backend = process.env.REACT_APP_BACKEND_URL || '';
-    if (!backend) return;
-
-    let statusTimer = null;
-    let metricsTimer = null;
-
-    const fetchStatus = async () => {
-      try {
-        const res = await fetch(`${backend}/api/status`);
-        if (res.ok) {
-          const data = await res.json();
-          setRestStatus(data);
-        }
-      } catch (e) {
-        // silent fallback
-      }
-    };
-
-    const fetchMetrics = async () => {
-      try {
-        const res = await fetch(`${backend}/api/metrics`);
-        if (res.ok) {
-          const data = await res.json();
-          setRestMetrics(data);
-        }
-      } catch (e) {
-        // silent fallback
-      }
-    };
-
-    fetchStatus();
-    fetchMetrics();
-
-    statusTimer = setInterval(fetchStatus, 30000);
-    metricsTimer = setInterval(fetchMetrics, 60000);
-
-    return () => {
-      if (statusTimer) clearInterval(statusTimer);
-      if (metricsTimer) clearInterval(metricsTimer);
-    };
-  }, []);
 
     }
   };
