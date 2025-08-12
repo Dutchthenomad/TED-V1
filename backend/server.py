@@ -463,7 +463,8 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("🛑 Shutting down Rugs Pattern Tracker")
-    await rugs_client.disconnect()
+    if rugs_client:
+        await rugs_client.disconnect()
     
     # Close all websocket connections
     for ws in connected_clients:
