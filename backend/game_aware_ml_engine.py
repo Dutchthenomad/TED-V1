@@ -85,10 +85,10 @@ class GamePatternAnalyzer:
         features.recent_ultra_short_count = len(pattern2.get('recent_ultra_shorts', []))
         
         # Calculate ultra-short probability
-        if features.last_end_price &gt;= 0.015:
+        if features.last_end_price >= 0.015:
             features.ultra_short_probability = 0.081  # 8.1% after high payout
             features.is_high_payout_recovery = True
-        elif features.recent_ultra_short_count &gt;= 2:
+        elif features.recent_ultra_short_count >= 2:
             features.ultra_short_probability = 0.096  # Clustering effect
         else:
             features.ultra_short_probability = 0.064  # Baseline
@@ -98,34 +98,34 @@ class GamePatternAnalyzer:
         features.games_since_moonshot = pattern3.get('games_since_moonshot', 999)
         
         # Determine momentum threshold
-        if features.peak_multiplier &gt;= 20:
+        if features.peak_multiplier >= 20:
             features.current_momentum_threshold = 20
             features.continuation_probability = 0.500
-        elif features.peak_multiplier &gt;= 12:
+        elif features.peak_multiplier >= 12:
             features.current_momentum_threshold = 12
             features.continuation_probability = 0.230
-        elif features.peak_multiplier &gt;= 8:
+        elif features.peak_multiplier >= 8:
             features.current_momentum_threshold = 8
             features.continuation_probability = 0.244
         
         # Calculate drought multiplier
-        if features.games_since_moonshot &lt; 42:
+        if features.games_since_moonshot < 42:
             features.drought_multiplier = 1.0
-        elif features.games_since_moonshot &lt; 63:
+        elif features.games_since_moonshot < 63:
             features.drought_multiplier = 1.2
-        elif features.games_since_moonshot &lt; 84:
+        elif features.games_since_moonshot < 84:
             features.drought_multiplier = 1.5
         else:
             features.drought_multiplier = 2.0
         
         # Classify duration category
-        if features.current_tick &lt;= 10:
+        if features.current_tick <= 10:
             features.duration_category = "ultra_short"
-        elif features.current_tick &lt;= 50:
+        elif features.current_tick <= 50:
             features.duration_category = "short"
-        elif features.current_tick &lt;= 300:
+        elif features.current_tick <= 300:
             features.duration_category = "normal"
-        elif features.current_tick &lt;= 500:
+        elif features.current_tick <= 500:
             features.duration_category = "extended"
         else:
             features.duration_category = "moonshot"
@@ -140,7 +140,7 @@ class GameAwarePredictionEngine:
         self.prediction_history = deque(maxlen=100)
         self.accuracy_tracker = deque(maxlen=50)
     
-    def generate_prediction(self, features: GameAwareFeatures) -&gt; Dict:
+    def generate_prediction(self, features: GameAwareFeatures) -> Dict:
         """Generate prediction based on game-aware features"""
         predictions = []
         weights = []
@@ -155,8 +155,8 @@ class GameAwarePredictionEngine:
             patterns_used.append("post_max_payout_recovery")
         
         # Pattern 2: Ultra-Short Prediction
-        if features.ultra_short_probability &gt; 0.07:  # Above baseline
-            if features.current_tick &lt;= 5:  # Early in game
+        if features.ultra_short_probability > 0.07:  # Above baseline
+            if features.current_tick <= 5:  # Early in game
                 # Predict ultra-short
                 predictions.append(8)
                 weights.append(features.ultra_short_probability * 10)  # Scale probability
@@ -165,7 +165,7 @@ class GameAwarePredictionEngine:
         # Pattern 3: Momentum Continuation
         if features.current_momentum_threshold is not None:
             prob = features.continuation_probability * features.drought_multiplier
-            if prob &gt; 0.3:  # Significant probability
+            if prob > 0.3:  # Significant probability
                 if features.current_momentum_threshold == 20:
                     prediction = features.current_tick * 1.5
                 elif features.current_momentum_threshold == 12:
@@ -200,7 +200,7 @@ class GameAwarePredictionEngine:
             }
         }
     
-    def calculate_side_bet_value(self, features: GameAwareFeatures) -&gt; Dict:
+    def calculate_side_bet_value(self, features: GameAwareFeatures) -> Dict:
         """Calculate expected value of side bet"""
         # Side bet wins if game ends within 40 ticks
         # Pays 5:1 (400% profit)
@@ -209,7 +209,7 @@ class GameAwarePredictionEngine:
         win_probability = features.ultra_short_probability
         
         # Boost probability if clustering or post-high-payout
-        if features.recent_ultra_short_count &gt;= 2:
+        if features.recent_ultra_short_count >= 2:
             win_probability *= 1.3  # Clustering boost
         if features.is_high_payout_recovery:
             win_probability *= 1.1  # Recovery boost
@@ -222,18 +222,18 @@ class GameAwarePredictionEngine:
         expected_value = (win_probability * 4.0) - ((1 - win_probability) * 1.0)
         
         return {
-            'should_bet': expected_value &gt; 0,
+            'should_bet': expected_value > 0,
             'win_probability': win_probability,
             'expected_value': expected_value,
             'confidence': win_probability,
             'recommendation': self._get_recommendation(expected_value, win_probability)
         }
     
-    def _get_recommendation(self, ev: float, prob: float) -&gt; str:
+    def _get_recommendation(self, ev: float, prob: float) -> str:
         """Generate bet recommendation"""
-        if ev &gt; 0.2:
+        if ev > 0.2:
             return f"STRONG BET: {prob:.1%} win probability, EV: {ev:.3f}"
-        elif ev &gt; 0:
+        elif ev > 0:
             return f"POSITIVE EV: {prob:.1%} win probability, EV: {ev:.3f}"
         else:
             return f"WAIT: {prob:.1%} win probability, EV: {ev:.3f}"
@@ -241,7 +241,7 @@ class GameAwarePredictionEngine:
     def update_accuracy(self, predicted: float, actual: float):
         """Track prediction accuracy"""
         error = abs(predicted - actual)
-        is_correct = error &lt;= 50  # Within tolerance
+        is_correct = error <= 50  # Within tolerance
         self.accuracy_tracker.append(is_correct)
         
         self.prediction_history.append({
@@ -252,7 +252,7 @@ class GameAwarePredictionEngine:
             'timestamp': datetime.now()
         })
     
-    def get_performance_metrics(self) -&gt; Dict:
+    def get_performance_metrics(self) -> Dict:
         """Get current performance metrics"""
         if not self.accuracy_tracker:
             return {'accuracy': 0.5, 'predictions': 0}
@@ -276,7 +276,7 @@ class GameAwareMLPatternEngine:
         """Update current game state"""
         self.base_engine.update_current_game(tick, price)
     
-    def predict_rug_timing(self, current_tick: int, current_price: float, peak_price: float) -&gt; Dict:
+    def predict_rug_timing(self, current_tick: int, current_price: float, peak_price: float) -> Dict:
         """Generate game-aware prediction"""
         try:
             # Get base prediction
@@ -344,7 +344,7 @@ class GameAwareMLPatternEngine:
         except Exception as e:
             logger.error(f"Error in game analysis: {e}")
     
-    def get_ml_status(self) -&gt; Dict:
+    def get_ml_status(self) -> Dict:
         """Get current status"""
         return {
             'performance': self.predictor.get_performance_metrics(),
