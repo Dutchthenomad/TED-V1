@@ -1,6 +1,6 @@
 """
-Game-Aware ML Engine - Focused on Validated Game Patterns Only
-No trading indicators, only proven patterns from knowledge base
+ML-Enhanced Pattern Engine - Simplified and Focused
+Only uses validated patterns, no trading indicators
 """
 
 import logging
@@ -8,345 +8,394 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 from collections import deque
+import statistics
 
 logger = logging.getLogger(__name__)
 
-# VALIDATED GAME CONSTANTS
+# VALIDATED CONSTANTS
 TICK_DURATION_MS = 250
 MEDIAN_DURATION = 205
 ULTRA_SHORT_THRESHOLD = 10
-MAX_PAYOUT_THRESHOLD = 0.019
 
 @dataclass
-class GameAwareFeatures:
-    """Features specific to validated game patterns"""
-    # Pattern 1: Post-Max-Payout
-    is_post_max_payout: bool = False
-    games_since_max_payout: int = 999
+class ValidatedFeatures:
+    """Only features validated in knowledge base"""
+    # Pattern 1 features
+    pattern1_triggered: bool = False
+    games_since_pattern1: int = 999
     
-    # Pattern 2: Ultra-Short Dynamics
-    ultra_short_probability: float = 0.064
-    recent_ultra_short_count: int = 0
-    last_end_price: float = 0.0
-    is_high_payout_recovery: bool = False
+    # Pattern 2 features
+    last_game_ultra_short: bool = False
+    last_game_end_price: float = 0.0
+    ultra_short_cluster_count: int = 0
     
-    # Pattern 3: Momentum Levels
-    current_momentum_threshold: Optional[int] = None  # 8, 12, or 20
-    continuation_probability: float = 0.0
+    # Pattern 3 features
+    current_peak: float = 1.0
+    crossed_8x: bool = False
+    crossed_12x: bool = False
+    crossed_20x: bool = False
     games_since_moonshot: int = 999
-    drought_multiplier: float = 1.0
     
-    # Game State
+    # Basic game state
     current_tick: int = 0
     current_multiplier: float = 1.0
-    peak_multiplier: float = 1.0
-    
-    # Derived features
-    duration_category: str = "normal"  # ultra_short, short, normal, extended, moonshot
-    expected_duration_multiplier: float = 1.0
+    tick_percentile: float = 0.5
 
-class GamePatternAnalyzer:
-    """Analyze game patterns based on validated findings"""
+@dataclass
+class SimpleLearningState:
+    """Simplified learning without complex ML"""
+    pattern_weights: Dict[str, float] = field(default_factory=lambda: {
+        'pattern1': 0.85,  # High confidence from validation
+        'pattern2': 0.78,  # Medium-high confidence
+        'pattern3': 0.91,  # Highest confidence
+        'baseline': 0.5    # Default weight
+    })
+    
+    prediction_history: deque = field(default_factory=lambda: deque(maxlen=100))
+    accuracy_window: deque = field(default_factory=lambda: deque(maxlen=50))
+    total_predictions: int = 0
+    correct_predictions: int = 0
+    
+    def update_accuracy(self, prediction: float, actual: float, tolerance: float = 50.0):
+        """Track prediction accuracy"""
+        is_correct = abs(prediction - actual) &lt;= tolerance
+        self.accuracy_window.append(is_correct)
+        self.total_predictions += 1
+        if is_correct:
+            self.correct_predictions += 1
+        
+        # Simple weight adjustment based on recent performance
+        if len(self.accuracy_window) &gt;= 20:
+            recent_accuracy = sum(self.accuracy_window) / len(self.accuracy_window)
+            # Adjust pattern weights slightly based on performance
+            if recent_accuracy &gt; 0.7:
+                # Performing well, slightly increase weights
+                for key in self.pattern_weights:
+                    if key != 'baseline':
+                        self.pattern_weights[key] = min(0.95, self.pattern_weights[key] * 1.01)
+            elif recent_accuracy &lt; 0.5:
+                # Underperforming, slightly decrease weights
+                for key in self.pattern_weights:
+                    if key != 'baseline':
+                        self.pattern_weights[key] = max(0.5, self.pattern_weights[key] * 0.99)
+    
+    def get_accuracy(self) -&gt; float:
+        if self.total_predictions == 0:
+            return 0.5
+        return self.correct_predictions / self.total_predictions
+
+class ValidatedFeatureExtractor:
+    """Extract only validated features from game data"""
     
     def __init__(self):
-        self.pattern_confidence = {
-            'pattern1': 0.85,  # 72.7% improvement validated
-            'pattern2': 0.78,  # 25.1% improvement validated  
-            'pattern3': 0.91   # Up to 50% improvement validated
-        }
-        
-        # Validated thresholds
-        self.momentum_thresholds = {
-            8: 0.244,   # 24.4% to reach 50x
-            12: 0.230,  # 23.0% to reach 100x
-            20: 0.500   # 50.0% to continue
-        }
+        self.game_history = deque(maxlen=100)
+        self.tick_history = deque(maxlen=100)
     
-    def analyze_game_state(self, game_state: Dict, pattern_states: Dict, 
-                          game_history: List) -> GameAwareFeatures:
-        """Extract game-aware features from current state"""
-        features = GameAwareFeatures()
+    def extract_features(self, current_game_state: Dict, pattern_states: Dict, 
+                        game_history: List) -&gt; ValidatedFeatures:
+        """Extract only validated features"""
+        features = ValidatedFeatures()
         
         # Basic game state
-        features.current_tick = game_state.get('currentTick', 0)
-        features.current_multiplier = game_state.get('currentPrice', 1.0)
-        features.peak_multiplier = game_state.get('peak_price', 1.0)
+        features.current_tick = current_game_state.get('currentTick', 0)
+        features.current_multiplier = current_game_state.get('currentPrice', 1.0)
+        features.current_peak = current_game_state.get('peak_price', 1.0)
         
-        # Pattern 1 analysis
-        pattern1 = pattern_states.get('pattern1', {})
-        features.games_since_max_payout = pattern1.get('games_since_max_payout', 999)
-        features.is_post_max_payout = features.games_since_max_payout <= 1
-        if features.is_post_max_payout:
-            features.expected_duration_multiplier = 1.244  # 24.4% longer
+        # Pattern 1 features
+        pattern1_state = pattern_states.get('pattern1', {})
+        features.games_since_pattern1 = pattern1_state.get('games_since_max_payout', 999)
+        features.pattern1_triggered = features.games_since_pattern1 &lt;= 1
         
-        # Pattern 2 analysis
-        pattern2 = pattern_states.get('pattern2', {})
-        features.last_end_price = pattern2.get('last_end_price', 0.0)
-        features.recent_ultra_short_count = len(pattern2.get('recent_ultra_shorts', []))
+        # Pattern 2 features
+        pattern2_state = pattern_states.get('pattern2', {})
+        features.last_game_end_price = pattern2_state.get('last_end_price', 0.0)
+        recent_ultra_shorts = pattern2_state.get('recent_ultra_shorts', [])
+        features.ultra_short_cluster_count = len(recent_ultra_shorts)
+        features.last_game_ultra_short = len(recent_ultra_shorts) &gt; 0
         
-        # Calculate ultra-short probability
-        if features.last_end_price >= 0.015:
-            features.ultra_short_probability = 0.081  # 8.1% after high payout
-            features.is_high_payout_recovery = True
-        elif features.recent_ultra_short_count >= 2:
-            features.ultra_short_probability = 0.096  # Clustering effect
-        else:
-            features.ultra_short_probability = 0.064  # Baseline
+        # Pattern 3 features
+        features.crossed_8x = features.current_peak &gt;= 8
+        features.crossed_12x = features.current_peak &gt;= 12
+        features.crossed_20x = features.current_peak &gt;= 20
+        pattern3_state = pattern_states.get('pattern3', {})
+        features.games_since_moonshot = pattern3_state.get('games_since_moonshot', 999)
         
-        # Pattern 3 analysis
-        pattern3 = pattern_states.get('pattern3', {})
-        features.games_since_moonshot = pattern3.get('games_since_moonshot', 999)
-        
-        # Determine momentum threshold
-        if features.peak_multiplier >= 20:
-            features.current_momentum_threshold = 20
-            features.continuation_probability = 0.500
-        elif features.peak_multiplier >= 12:
-            features.current_momentum_threshold = 12
-            features.continuation_probability = 0.230
-        elif features.peak_multiplier >= 8:
-            features.current_momentum_threshold = 8
-            features.continuation_probability = 0.244
-        
-        # Calculate drought multiplier
-        if features.games_since_moonshot < 42:
-            features.drought_multiplier = 1.0
-        elif features.games_since_moonshot < 63:
-            features.drought_multiplier = 1.2
-        elif features.games_since_moonshot < 84:
-            features.drought_multiplier = 1.5
-        else:
-            features.drought_multiplier = 2.0
-        
-        # Classify duration category
-        if features.current_tick <= 10:
-            features.duration_category = "ultra_short"
-        elif features.current_tick <= 50:
-            features.duration_category = "short"
-        elif features.current_tick <= 300:
-            features.duration_category = "normal"
-        elif features.current_tick <= 500:
-            features.duration_category = "extended"
-        else:
-            features.duration_category = "moonshot"
+        # Calculate tick percentile
+        if game_history and len(game_history) &gt; 10:
+            final_ticks = [getattr(g, 'final_tick', 0) for g in game_history[-100:]]
+            final_ticks = [t for t in final_ticks if t &gt; 0]
+            if final_ticks:
+                below_count = sum(1 for t in final_ticks if t &lt; features.current_tick)
+                features.tick_percentile = below_count / len(final_ticks)
         
         return features
 
-class GameAwarePredictionEngine:
-    """Prediction engine using only validated game patterns"""
+class SimpleLearningEngine:
+    """Simplified learning focused on pattern combination"""
     
     def __init__(self):
-        self.analyzer = GamePatternAnalyzer()
-        self.prediction_history = deque(maxlen=100)
-        self.accuracy_tracker = deque(maxlen=50)
+        self.state = SimpleLearningState()
+        self.performance_tracker = deque(maxlen=200)
     
-    def generate_prediction(self, features: GameAwareFeatures) -> Dict:
-        """Generate prediction based on game-aware features"""
-        predictions = []
-        weights = []
-        patterns_used = []
-        
-        # Pattern 1: Post-Max-Payout Recovery
-        if features.is_post_max_payout:
-            # Expect 24.4% longer duration
-            prediction = MEDIAN_DURATION * 1.244
-            predictions.append(prediction)
-            weights.append(self.analyzer.pattern_confidence['pattern1'])
-            patterns_used.append("post_max_payout_recovery")
-        
-        # Pattern 2: Ultra-Short Prediction
-        if features.ultra_short_probability > 0.07:  # Above baseline
-            if features.current_tick <= 5:  # Early in game
-                # Predict ultra-short
-                predictions.append(8)
-                weights.append(features.ultra_short_probability * 10)  # Scale probability
-                patterns_used.append("ultra_short_prediction")
-        
-        # Pattern 3: Momentum Continuation
-        if features.current_momentum_threshold is not None:
-            prob = features.continuation_probability * features.drought_multiplier
-            if prob > 0.3:  # Significant probability
-                if features.current_momentum_threshold == 20:
-                    prediction = features.current_tick * 1.5
-                elif features.current_momentum_threshold == 12:
-                    prediction = features.current_tick * 1.3
-                else:
-                    prediction = features.current_tick * 1.2
-                
-                predictions.append(prediction)
-                weights.append(prob)
-                patterns_used.append(f"momentum_{features.current_momentum_threshold}x")
-        
-        # Combine predictions
-        if predictions:
-            total_weight = sum(weights)
-            weighted_prediction = sum(p * w for p, w in zip(predictions, weights)) / total_weight
-            confidence = min(0.95, sum(weights) / len(weights))
-        else:
-            # Default prediction
-            weighted_prediction = MEDIAN_DURATION
-            confidence = 0.5
-            patterns_used = ["baseline"]
-        
-        return {
-            'predicted_tick': int(weighted_prediction),
-            'confidence': confidence,
-            'patterns_used': patterns_used,
-            'features': {
-                'ultra_short_prob': features.ultra_short_probability,
-                'momentum_threshold': features.current_momentum_threshold,
-                'drought_multiplier': features.drought_multiplier,
-                'is_post_max_payout': features.is_post_max_payout
+    def predict_with_features(self, features: ValidatedFeatures, base_predictions: Dict[str, float]) -&gt; Dict:
+        """Combine pattern predictions with simple weighting"""
+        try:
+            # Calculate pattern-based adjustments
+            adjustments = self._calculate_pattern_adjustments(features)
+            
+            # Weight base predictions
+            weighted_prediction = 0.0
+            total_weight = 0.0
+            
+            for pattern_id, prediction in base_predictions.items():
+                weight = self.state.pattern_weights.get(pattern_id, 0.5)
+                weighted_prediction += prediction * weight
+                total_weight += weight
+            
+            if total_weight &gt; 0:
+                weighted_prediction /= total_weight
+            
+            # Apply pattern adjustments
+            final_prediction = weighted_prediction + adjustments
+            
+            # Calculate confidence based on active patterns
+            confidence = self._calculate_confidence(features)
+            
+            return {
+                'prediction': max(0, final_prediction),
+                'confidence': confidence,
+                'base_prediction': weighted_prediction,
+                'adjustments': adjustments,
+                'pattern_weights': dict(self.state.pattern_weights),
+                'active_patterns': self._get_active_patterns(features)
             }
-        }
+            
+        except Exception as e:
+            logger.error(f"Error in prediction: {e}")
+            # Fallback to median duration
+            return {
+                'prediction': MEDIAN_DURATION,
+                'confidence': 0.5,
+                'error': str(e),
+                'fallback_used': True
+            }
     
-    def calculate_side_bet_value(self, features: GameAwareFeatures) -> Dict:
-        """Calculate expected value of side bet"""
-        # Side bet wins if game ends within 40 ticks
-        # Pays 5:1 (400% profit)
+    def _calculate_pattern_adjustments(self, features: ValidatedFeatures) -&gt; float:
+        """Calculate adjustments based on validated patterns"""
+        adjustment = 0.0
         
-        # Focus on ultra-short probability (≤10 ticks)
-        win_probability = features.ultra_short_probability
+        # Pattern 1: Post-max-payout recovery
+        if features.pattern1_triggered:
+            # Expect 24.4% longer games
+            adjustment += MEDIAN_DURATION * 0.244
         
-        # Boost probability if clustering or post-high-payout
-        if features.recent_ultra_short_count >= 2:
-            win_probability *= 1.3  # Clustering boost
-        if features.is_high_payout_recovery:
-            win_probability *= 1.1  # Recovery boost
+        # Pattern 2: Ultra-short clustering
+        if features.ultra_short_cluster_count &gt;= 2:
+            # High clustering, expect more ultra-shorts
+            adjustment -= (features.current_tick * 0.5)  # Predict shorter
+        elif features.last_game_end_price &gt;= 0.015:
+            # Post-high-payout, slight ultra-short boost
+            adjustment -= 20
         
-        # Cap at reasonable maximum
-        win_probability = min(0.15, win_probability)
+        # Pattern 3: Momentum thresholds
+        if features.crossed_20x:
+            # 50% chance of continuation
+            adjustment += features.current_tick * 0.5
+        elif features.crossed_12x:
+            # 23% chance of reaching 100x
+            adjustment += features.current_tick * 0.3
+        elif features.crossed_8x:
+            # 24.4% chance of reaching 50x
+            adjustment += features.current_tick * 0.2
         
-        # Calculate expected value
-        # EV = P(win) * 4.0 - P(lose) * 1.0
-        expected_value = (win_probability * 4.0) - ((1 - win_probability) * 1.0)
+        # Drought effect
+        if features.games_since_moonshot &gt; 84:
+            adjustment *= 1.5  # Extreme drought multiplier
+        elif features.games_since_moonshot &gt; 63:
+            adjustment *= 1.3  # High drought
+        elif features.games_since_moonshot &gt; 42:
+            adjustment *= 1.1  # Elevated drought
         
-        return {
-            'should_bet': expected_value > 0,
-            'win_probability': win_probability,
-            'expected_value': expected_value,
-            'confidence': win_probability,
-            'recommendation': self._get_recommendation(expected_value, win_probability)
-        }
+        return adjustment
     
-    def _get_recommendation(self, ev: float, prob: float) -> str:
-        """Generate bet recommendation"""
-        if ev > 0.2:
-            return f"STRONG BET: {prob:.1%} win probability, EV: {ev:.3f}"
-        elif ev > 0:
-            return f"POSITIVE EV: {prob:.1%} win probability, EV: {ev:.3f}"
-        else:
-            return f"WAIT: {prob:.1%} win probability, EV: {ev:.3f}"
-    
-    def update_accuracy(self, predicted: float, actual: float):
-        """Track prediction accuracy"""
-        error = abs(predicted - actual)
-        is_correct = error <= 50  # Within tolerance
-        self.accuracy_tracker.append(is_correct)
+    def _calculate_confidence(self, features: ValidatedFeatures) -&gt; float:
+        """Calculate confidence based on active patterns"""
+        confidence = 0.5  # Base confidence
         
-        self.prediction_history.append({
-            'predicted': predicted,
-            'actual': actual,
-            'error': error,
-            'correct': is_correct,
-            'timestamp': datetime.now()
-        })
+        # Boost confidence for active patterns
+        if features.pattern1_triggered:
+            confidence += 0.15
+        
+        if features.ultra_short_cluster_count &gt;= 2:
+            confidence += 0.1
+        
+        if features.crossed_8x or features.crossed_12x or features.crossed_20x:
+            confidence += 0.2
+        
+        # Adjust for accuracy
+        if self.state.total_predictions &gt; 20:
+            accuracy_bonus = (self.state.get_accuracy() - 0.5) * 0.3
+            confidence += accuracy_bonus
+        
+        return max(0.1, min(0.95, confidence))
     
-    def get_performance_metrics(self) -> Dict:
+    def _get_active_patterns(self, features: ValidatedFeatures) -&gt; List[str]:
+        """Identify active patterns"""
+        active = []
+        
+        if features.pattern1_triggered:
+            active.append("pattern1_recovery")
+        
+        if features.ultra_short_cluster_count &gt;= 2:
+            active.append("pattern2_clustering")
+        elif features.last_game_end_price &gt;= 0.015:
+            active.append("pattern2_post_high_payout")
+        
+        if features.crossed_20x:
+            active.append("pattern3_20x_momentum")
+        elif features.crossed_12x:
+            active.append("pattern3_12x_momentum")
+        elif features.crossed_8x:
+            active.append("pattern3_8x_momentum")
+        
+        if not active:
+            active.append("baseline")
+        
+        return active
+    
+    def update_weights(self, prediction_result: Dict, actual_outcome: float):
+        """Update weights based on prediction accuracy"""
+        try:
+            prediction = prediction_result.get('prediction', 0)
+            self.state.update_accuracy(prediction, actual_outcome)
+            
+            # Track performance
+            error = abs(prediction - actual_outcome)
+            self.performance_tracker.append({
+                'prediction': prediction,
+                'actual': actual_outcome,
+                'error': error,
+                'timestamp': datetime.now()
+            })
+            
+            logger.info(f"📈 Accuracy updated: {self.state.get_accuracy():.3f}, Error: {error:.1f}")
+            
+        except Exception as e:
+            logger.error(f"Error updating weights: {e}")
+    
+    def get_performance_metrics(self) -&gt; Dict:
         """Get current performance metrics"""
-        if not self.accuracy_tracker:
-            return {'accuracy': 0.5, 'predictions': 0}
-        
         return {
-            'accuracy': sum(self.accuracy_tracker) / len(self.accuracy_tracker),
-            'predictions': len(self.prediction_history),
-            'recent_errors': [p['error'] for p in list(self.prediction_history)[-10:]]
+            'overall_accuracy': self.state.get_accuracy(),
+            'recent_accuracy': sum(self.state.accuracy_window) / len(self.state.accuracy_window) 
+                              if self.state.accuracy_window else 0.0,
+            'total_predictions': self.state.total_predictions,
+            'pattern_weights': dict(self.state.pattern_weights),
+            'predictions_in_window': len(self.state.prediction_history)
         }
 
-class GameAwareMLPatternEngine:
-    """Main engine for game-aware pattern prediction"""
+class MLEnhancedPatternEngine:
+    """Main engine combining base patterns with simple ML enhancement"""
     
     def __init__(self, base_pattern_engine):
         self.base_engine = base_pattern_engine
-        self.analyzer = GamePatternAnalyzer()
-        self.predictor = GameAwarePredictionEngine()
+        self.feature_extractor = ValidatedFeatureExtractor()
+        self.learning_engine = SimpleLearningEngine()
+        self.ml_enabled = True
         self._last_prediction = None
     
     def update_current_game(self, tick: int, price: float):
         """Update current game state"""
         self.base_engine.update_current_game(tick, price)
     
-    def predict_rug_timing(self, current_tick: int, current_price: float, peak_price: float) -> Dict:
-        """Generate game-aware prediction"""
+    def predict_rug_timing(self, current_tick: int, current_price: float, peak_price: float) -&gt; Dict:
+        """Generate enhanced prediction"""
         try:
             # Get base prediction
             base_prediction = self.base_engine.predict_rug_timing(current_tick, current_price, peak_price)
             
+            if not self.ml_enabled:
+                self._last_prediction = base_prediction
+                return base_prediction
+            
             # Prepare game state
-            game_state = {
+            current_game_state = {
                 'currentTick': current_tick,
                 'currentPrice': current_price,
                 'peak_price': peak_price
             }
             
-            # Analyze game features
-            features = self.analyzer.analyze_game_state(
-                game_state,
+            # Extract validated features
+            features = self.feature_extractor.extract_features(
+                current_game_state,
                 self.base_engine.pattern_states,
                 self.base_engine.game_history
             )
             
-            # Generate prediction
-            game_prediction = self.predictor.generate_prediction(features)
-            
-            # Calculate side bet value
-            side_bet = self.predictor.calculate_side_bet_value(features)
-            
-            # Combine predictions (60% game-aware, 40% base)
-            final_prediction = int(
-                game_prediction['predicted_tick'] * 0.6 +
-                base_prediction['predicted_tick'] * 0.4
-            )
-            
-            result = {
-                'predicted_tick': final_prediction,
-                'confidence': game_prediction['confidence'],
-                'tolerance': 50,
-                'based_on_patterns': game_prediction['patterns_used'],
-                'side_bet_recommendation': side_bet,
-                'game_features': game_prediction['features'],
-                'performance': self.predictor.get_performance_metrics()
+            # Prepare base predictions for combination
+            base_predictions = {
+                'baseline': base_prediction.get('predicted_tick', MEDIAN_DURATION),
+                'pattern1': MEDIAN_DURATION * 1.244 if features.pattern1_triggered else MEDIAN_DURATION,
+                'pattern2': 8 if features.ultra_short_cluster_count &gt;= 2 else current_tick + 30,
+                'pattern3': int(current_tick * 1.3) if features.crossed_8x else current_tick + 20
             }
             
-            self._last_prediction = result
-            return result
+            # Get ML-enhanced prediction
+            ml_result = self.learning_engine.predict_with_features(features, base_predictions)
+            
+            # Combine base and ML predictions
+            ml_weight = min(0.6, self.learning_engine.state.get_accuracy())
+            base_weight = 1.0 - ml_weight
+            
+            final_prediction = (
+                ml_result['prediction'] * ml_weight + 
+                base_prediction['predicted_tick'] * base_weight
+            )
+            
+            # Build enhanced result
+            enhanced_result = {
+                'predicted_tick': int(final_prediction),
+                'confidence': ml_result['confidence'],
+                'tolerance': base_prediction.get('tolerance', 50),
+                'based_on_patterns': ml_result['active_patterns'],
+                'ml_enhancement': {
+                    'ml_prediction': ml_result['prediction'],
+                    'base_prediction': base_prediction['predicted_tick'],
+                    'ml_weight': ml_weight,
+                    'adjustments': ml_result.get('adjustments', 0)
+                },
+                'performance': self.learning_engine.get_performance_metrics()
+            }
+            
+            self._last_prediction = enhanced_result
+            return enhanced_result
             
         except Exception as e:
-            logger.error(f"Error in game-aware prediction: {e}")
-            # Fallback
+            logger.error(f"Error in ML-enhanced prediction: {e}")
+            # Fallback to base prediction
             fallback = self.base_engine.predict_rug_timing(current_tick, current_price, peak_price)
+            fallback['ml_error'] = str(e)
             self._last_prediction = fallback
             return fallback
     
     def complete_game_analysis(self, completed_game):
-        """Analyze completed game"""
+        """Analyze completed game and update learning"""
         try:
             # Update base engine
             self.base_engine.add_completed_game(completed_game)
             
-            # Update accuracy if we made a prediction
+            # Update ML learning if we made a prediction
             if self._last_prediction:
-                self.predictor.update_accuracy(
-                    self._last_prediction['predicted_tick'],
-                    completed_game.final_tick
-                )
+                actual_tick = completed_game.final_tick
+                self.learning_engine.update_weights(self._last_prediction, actual_tick)
                 
         except Exception as e:
             logger.error(f"Error in game analysis: {e}")
     
-    def get_ml_status(self) -> Dict:
-        """Get current status"""
+    def get_ml_status(self) -&gt; Dict:
+        """Get current ML status"""
         return {
-            'performance': self.predictor.get_performance_metrics(),
+            'ml_enabled': self.ml_enabled,
+            'learning_metrics': self.learning_engine.get_performance_metrics(),
             'last_prediction': self._last_prediction
         }

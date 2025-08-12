@@ -18,10 +18,25 @@ from collections import deque
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
+# MongoDB connection - with safe fallback
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+
+# Use DB_NAME if provided, otherwise fallback to 'rugs_tracker' or extract from URL
+if 'DB_NAME' in os.environ:
+    db_name = os.environ['DB_NAME']
+else:
+    # Try to extract DB name from URL, otherwise use default
+    if '/' in mongo_url and mongo_url.rstrip('/').split('/')[-1]:
+        # MongoDB URLs can have format: mongodb://.../&lt;database_name&gt;
+        db_name = mongo_url.rstrip('/').split('/')[-1].split('?')[0]
+        if not db_name or db_name == 'test':
+            db_name = 'rugs_tracker'
+    else:
+        db_name = 'rugs_tracker'
+    logging.getLogger(__name__).info(f"No DB_NAME env var found, using database: {db_name}")
+
+db = client[db_name]
 
 # Logging
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
@@ -161,7 +176,7 @@ class IntegratedPatternTracker:
         })
         
         # Track peak price
-        if current_price > self.current_game['peak_price']:
+        if current_price &gt; self.current_game['peak_price']:
             self.current_game['peak_price'] = current_price
         
         # Update pattern engines
@@ -175,7 +190,7 @@ class IntegratedPatternTracker:
         
         # Get side bet recommendation (only early in game)
         side_bet = None
-        if current_tick <= 5 and not self.current_game.get('side_bet_evaluated', False):
+        if current_tick &lt;= 5 and not self.current_game.get('side_bet_evaluated', False):
             side_bet = self.enhanced_engine.get_side_bet_recommendation()
             self._record_side_bet_recommendation(side_bet, game_id, current_tick)
             self.current_game['side_bet_evaluated'] = True
@@ -252,7 +267,7 @@ class IntegratedPatternTracker:
                     'predicted_tick': predicted_tick,
                     'actual_tick': actual_tick,
                     'diff': diff,
-                    'within_tolerance': diff <= 50,
+                    'within_tolerance': diff &lt;= 50,
                     'peak_price': completed_game.peak_price,
                     'end_price': completed_game.end_price,
                     'is_ultra_short': completed_game.is_ultra_short,
@@ -278,7 +293,7 @@ class IntegratedPatternTracker:
             self.side_bet_history.append(record)
             
             self.side_bet_performance['total_recommendations'] += 1
-            if side_bet['expected_value'] > 0:
+            if side_bet['expected_value'] &gt; 0:
                 self.side_bet_performance['positive_ev_bets'] += 1
                 self.side_bet_performance['total_ev'] += side_bet['expected_value']
     
@@ -288,7 +303,7 @@ class IntegratedPatternTracker:
         for bet in list(self.side_bet_history)[-10:]:
             if bet['game_id'] == completed_game.game_id:
                 # Side bet wins if game ended within 40 ticks
-                if completed_game.final_tick <= 40:
+                if completed_game.final_tick &lt;= 40:
                     self.side_bet_performance['bets_won'] += 1
                     logger.info(f"✅ Side bet WON for game {completed_game.game_id} (ended at {completed_game.final_tick})")
                 else:
@@ -406,7 +421,7 @@ async def startup_event():
     # Connection manager task
     async def connection_manager():
         while True:
-            if not rugs_client.connected and rugs_client.reconnect_attempts < rugs_client.max_reconnect_attempts:
+            if not rugs_client.connected and rugs_client.reconnect_attempts &lt; rugs_client.max_reconnect_attempts:
                 logger.info(f"🔄 Attempting to connect to Rugs.fun (attempt {rugs_client.reconnect_attempts + 1})")
                 success = await rugs_client.connect_to_rugs()
                 
@@ -417,7 +432,7 @@ async def startup_event():
                 else:
                     logger.info("✅ Successfully connected to Rugs.fun")
                     
-            elif rugs_client.reconnect_attempts >= rugs_client.max_reconnect_attempts:
+            elif rugs_client.reconnect_attempts &gt;= rugs_client.max_reconnect_attempts:
                 logger.error("💀 Max reconnection attempts reached. Waiting...")
                 await asyncio.sleep(60)
                 rugs_client.reconnect_attempts = 0
@@ -463,7 +478,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     pattern_tracker.current_game.get('peak_price', 1.0)
                 ),
                 'side_bet_recommendation': pattern_tracker.enhanced_engine.get_side_bet_recommendation()
-                    if pattern_tracker.current_game.get('currentTick', 0) <= 5 else None,
+                    if pattern_tracker.current_game.get('currentTick', 0) &lt;= 5 else None,
                 'ml_status': pattern_tracker.ml_engine.get_ml_status(),
                 'prediction_history': list(pattern_tracker.prediction_history)[-20:],
                 'side_bet_performance': pattern_tracker.side_bet_performance,
@@ -579,7 +594,7 @@ async def get_current_patterns():
             prediction = pattern_tracker.ml_engine.predict_rug_timing(tick, price, peak)
             
             # Only recommend side bet early in game
-            if tick <= 5:
+            if tick &lt;= 5:
                 side_bet = pattern_tracker.enhanced_engine.get_side_bet_recommendation()
         
         return {
