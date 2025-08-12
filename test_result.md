@@ -158,7 +158,7 @@
 ##         -working: "NA"
 ##         -agent: "main"
 ##         -comment: "No changes required; backend preserves fields." 
-##   - task: "Average End Price in Live Tracking with selectable window (5,10,20,25,50,100) default 20; compute from WS prediction_history only"
+##   - task: "Average End Price card below Live Tracking with selectable window (5,10,20,25,50,100) default 20; compute from WS prediction_history only"
 ##     implemented: true
 ##     working: "NA"
 ##     file: "/app/frontend/src/App.js"
