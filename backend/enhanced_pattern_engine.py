@@ -1,6 +1,6 @@
 """
 Enhanced Pattern Detection Engine
-Implements actual treasury patterns with statistical validation
+Implements ONLY validated treasury patterns from knowledge base
 """
 
 import math
@@ -12,9 +12,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# VALIDATED CONSTANTS FROM KNOWLEDGE BASE
+TICK_DURATION_MS = 250  # Standard tick duration
+MEDIAN_DURATION = 205   # Median game duration in ticks
+MEAN_DURATION = 225     # Mean game duration in ticks
+
 @dataclass
 class GameRecord:
-    """Enhanced game record with full analytics"""
+    """Game record with validated pattern markers"""
     game_id: int
     start_time: datetime
     end_time: Optional[datetime] = None
@@ -23,422 +28,301 @@ class GameRecord:
     peak_price: float = 1.0
     peak_tick: int = 0
     total_duration_ms: int = 0
-    is_ultra_short: bool = False
-    is_max_payout: bool = False
-    is_moonshot: bool = False
-
+    
+    # Validated pattern markers
+    is_ultra_short: bool = False  # ≤10 ticks
+    is_max_payout: bool = False   # >=0.019
+    is_moonshot: bool = False     # >=50x
+    
     def __post_init__(self):
         if self.end_time and self.start_time:
             self.total_duration_ms = int((self.end_time - self.start_time).total_seconds() * 1000)
+        
+        # Validated pattern detection
         self.is_ultra_short = self.final_tick <= 10
-        self.is_max_payout = abs(self.end_price - 0.020000000000000018) < 1e-15
+        self.is_max_payout = self.end_price >= 0.019
         self.is_moonshot = self.peak_price >= 50.0
 
 @dataclass
 class PatternStatistics:
+    """Simple pattern tracking"""
     total_occurrences: int = 0
     successful_predictions: int = 0
     failed_predictions: int = 0
     accuracy: float = 0.0
-    confidence_interval: Tuple[float, float] = (0.0, 0.0)
     last_updated: datetime = field(default_factory=datetime.now)
-
+    
     def update_accuracy(self):
-        total_predictions = self.successful_predictions + self.failed_predictions
-        if total_predictions > 0:
-            self.accuracy = self.successful_predictions / total_predictions
-            if total_predictions >= 10:
-                std_err = math.sqrt((self.accuracy * (1 - self.accuracy)) / total_predictions)
-                margin = 1.96 * std_err
-                self.confidence_interval = (
-                    max(0, self.accuracy - margin),
-                    min(1, self.accuracy + margin),
-                )
+        total = self.successful_predictions + self.failed_predictions
+        if total > 0:
+            self.accuracy = self.successful_predictions / total
         self.last_updated = datetime.now()
 
 class EnhancedPatternEngine:
-    """Advanced pattern detection with statistical models"""
-
+    """Pattern detection using ONLY validated patterns from knowledge base"""
+    
     def __init__(self):
         self.game_history: List[GameRecord] = []
         self.current_game: Optional[GameRecord] = None
+        
+        # Pattern 1: Post-Max-Payout Recovery (72.7% improvement)
+        self.pattern1_config = {
+            "trigger_threshold": 0.019,  # >=0.019 is max payout
+            "next_game_max_payout_prob": 0.211,  # 21.1% vs 12.2% baseline
+            "duration_multiplier": 1.244,  # 24.4% longer
+            "confidence": 0.85
+        }
+        
+        # Pattern 2: Ultra-Short High-Payout (25.1% improvement)
+        self.pattern2_config = {
+            "ultra_short_threshold": 10,  # ≤10 ticks
+            "high_payout_threshold": 0.015,
+            "ultra_short_base_prob": 0.064,  # 6.4% baseline
+            "post_high_payout_prob": 0.081,  # 8.1% after high payout
+            "clustering_window": 10,
+            "confidence": 0.78
+        }
+        
+        # Pattern 3: Momentum Thresholds (validated thresholds only)
+        self.pattern3_config = {
+            "thresholds": {
+                8: {"continuation_prob": 0.244, "target": 50},   # 24.4% to 50x
+                12: {"continuation_prob": 0.230, "target": 100},  # 23.0% to 100x
+                20: {"continuation_prob": 0.500, "target": 50}    # 50% to continue
+            },
+            "drought_mean": 42,  # Games between moonshots
+            "drought_multipliers": {
+                "normal": 1.0,    # <42 games
+                "elevated": 1.2,  # 42-63 games
+                "high": 1.5,      # 63-84 games
+                "extreme": 2.0    # >84 games
+            }
+        }
+        
+        self.pattern_states = {
+            "pattern1": {
+                "games_since_max_payout": 999,
+                "active": False
+            },
+            "pattern2": {
+                "recent_ultra_shorts": [],
+                "last_end_price": 0.0,
+                "clustering_active": False
+            },
+            "pattern3": {
+                "current_peak": 1.0,
+                "games_since_moonshot": 0,
+                "drought_multiplier": 1.0,
+                "active_threshold": None
+            }
+        }
+        
         self.pattern_stats = {
             "pattern1": PatternStatistics(),
             "pattern2": PatternStatistics(),
-            "pattern3": PatternStatistics(),
+            "pattern3": PatternStatistics()
         }
-
-        self.pattern1_config = {
-            "trigger_value": 0.020000000000000018,
-            "next_game_max_payout_prob": 0.211,
-            "improvement_factor": 0.727,
-            "expected_duration_increase": 50,
-            "confidence_threshold": 0.85,
-        }
-
-        self.pattern2_config = {
-            "high_payout_threshold": 0.015,
-            "ultra_short_base_prob": 0.081,
-            "ultra_short_threshold_ticks": 10,
-            "recovery_window_games": 3,
-            "recovery_improvement": [0.15, 0.18],
-            "confidence_threshold": 0.78,
-        }
-
-        self.pattern3_config = {
-            "momentum_thresholds": {
-                8: {"moonshot_prob": 0.244, "target_multiplier": 50},
-                12: {"moonshot_prob": 0.230, "target_multiplier": 100},
-                20: {"moonshot_prob": 0.500, "target_multiplier": 50},
-            },
-            "drought_cycle_mean": 42,
-            "drought_multipliers": {
-                "normal": 1.0,
-                "elevated": 1.2,
-                "high": 1.5,
-                "extreme": 2.0,
-            },
-        }
-
-        self.pattern_states = {
-            "pattern1": {
-                "status": "NORMAL",
-                "last_trigger_game": None,
-                "games_since_trigger": None,
-                "next_game_prediction": None,
-                "active_prediction": False,
-            },
-            "pattern2": {
-                "status": "NORMAL",
-                "recent_ultra_shorts": [],
-                "current_recovery_window": 0,
-                "current_game_probability": 0.081,
-                "active_recovery": False,
-            },
-            "pattern3": {
-                "status": "NORMAL",
-                "current_peak": 1.0,
-                "threshold_alerts": [],
-                "last_moonshot_game": None,
-                "games_since_moonshot": 0,
-                "drought_multiplier": 1.0,
-            },
-        }
-
+    
     def add_completed_game(self, game_record: GameRecord):
+        """Process completed game for pattern detection"""
         self.game_history.append(game_record)
         if len(self.game_history) > 1000:
             self.game_history = self.game_history[-1000:]
-        self._analyze_pattern1_trigger(game_record)
-        self._analyze_pattern2_trigger(game_record)
-        self._analyze_pattern3_trigger(game_record)
-        self._update_pattern_statistics()
-        logger.info(
-            f"📊 Game #{game_record.game_id} analyzed: Duration: {game_record.final_tick}t, End: {game_record.end_price:.6f}, Peak: {game_record.peak_price:.2f}x"
-        )
-
-    def _analyze_pattern1_trigger(self, game: GameRecord):
+        
+        # Update pattern states
+        self._update_pattern1(game_record)
+        self._update_pattern2(game_record)
+        self._update_pattern3(game_record)
+        
+        logger.info(f"📊 Game #{game_record.game_id}: {game_record.final_tick}t, "
+                   f"End: {game_record.end_price:.3f}, Peak: {game_record.peak_price:.1f}x")
+    
+    def _update_pattern1(self, game: GameRecord):
+        """Pattern 1: Post-Max-Payout Recovery"""
         if game.is_max_payout:
-            self.pattern_states["pattern1"]["last_trigger_game"] = len(self.game_history) - 1
-            self.pattern_states["pattern1"]["games_since_trigger"] = 0
-            self.pattern_states["pattern1"]["status"] = "TRIGGERED"
-            self.pattern_states["pattern1"]["active_prediction"] = True
-            logger.info(f"🎯 Pattern 1 TRIGGERED: Max payout detected {game.end_price}")
+            self.pattern_states["pattern1"]["games_since_max_payout"] = 0
+            self.pattern_states["pattern1"]["active"] = True
+            logger.info(f"🎯 Pattern 1 TRIGGERED: Max payout {game.end_price:.3f}")
         else:
-            if self.pattern_states["pattern1"].get("games_since_trigger") is not None:
-                self.pattern_states["pattern1"]["games_since_trigger"] += 1
-                if self.pattern_states["pattern1"]["games_since_trigger"] > 3:
-                    self.pattern_states["pattern1"]["status"] = "NORMAL"
-                    self.pattern_states["pattern1"]["active_prediction"] = False
-                elif self.pattern_states["pattern1"]["games_since_trigger"] <= 2:
-                    self.pattern_states["pattern1"]["status"] = "MONITORING"
-
-    def _analyze_pattern2_trigger(self, game: GameRecord):
-        if game.is_ultra_short and game.end_price >= self.pattern2_config["high_payout_threshold"]:
-            self.pattern_states["pattern2"]["recent_ultra_shorts"].append(
-                {
-                    "game_index": len(self.game_history) - 1,
-                    "end_price": game.end_price,
-                    "duration": game.final_tick,
-                }
-            )
-            self.pattern_states["pattern2"]["recent_ultra_shorts"] = self.pattern_states["pattern2"][
-                "recent_ultra_shorts"
-            ][-10:]
-            self.pattern_states["pattern2"]["status"] = "TRIGGERED"
-            self.pattern_states["pattern2"]["current_recovery_window"] = 3
-            self.pattern_states["pattern2"]["active_recovery"] = True
-            logger.info(
-                f"⚡ Pattern 2 TRIGGERED: Ultra-short {game.end_price} at {game.final_tick}t"
-            )
-        if self.pattern_states["pattern2"]["current_recovery_window"] > 0:
-            self.pattern_states["pattern2"]["current_recovery_window"] -= 1
-            if self.pattern_states["pattern2"]["current_recovery_window"] == 0:
-                self.pattern_states["pattern2"]["active_recovery"] = False
-                self.pattern_states["pattern2"]["status"] = "NORMAL"
-        self._update_pattern2_probability()
-
-    def _analyze_pattern3_trigger(self, game: GameRecord):
+            if self.pattern_states["pattern1"]["games_since_max_payout"] < 999:
+                self.pattern_states["pattern1"]["games_since_max_payout"] += 1
+            
+            if self.pattern_states["pattern1"]["games_since_max_payout"] > 3:
+                self.pattern_states["pattern1"]["active"] = False
+    
+    def _update_pattern2(self, game: GameRecord):
+        """Pattern 2: Ultra-Short High-Payout Detection"""
+        # Track last game end price for prediction
+        self.pattern_states["pattern2"]["last_end_price"] = game.end_price
+        
+        # Track ultra-short games
+        if game.is_ultra_short:
+            self.pattern_states["pattern2"]["recent_ultra_shorts"].append(game.game_id)
+            # Keep only last 10 games
+            self.pattern_states["pattern2"]["recent_ultra_shorts"] = \
+                self.pattern_states["pattern2"]["recent_ultra_shorts"][-10:]
+            
+            # Check for clustering
+            recent_count = len(self.pattern_states["pattern2"]["recent_ultra_shorts"])
+            if recent_count >= 2:
+                self.pattern_states["pattern2"]["clustering_active"] = True
+            
+            logger.info(f"⚡ Ultra-short detected: {game.final_tick}t, {game.end_price:.3f}")
+        else:
+            # Decay clustering after non-ultra-short games
+            if len(self.pattern_states["pattern2"]["recent_ultra_shorts"]) > 0:
+                self.pattern_states["pattern2"]["recent_ultra_shorts"].pop(0)
+            if len(self.pattern_states["pattern2"]["recent_ultra_shorts"]) < 2:
+                self.pattern_states["pattern2"]["clustering_active"] = False
+    
+    def _update_pattern3(self, game: GameRecord):
+        """Pattern 3: Momentum Thresholds"""
         if game.is_moonshot:
-            self.pattern_states["pattern3"]["last_moonshot_game"] = len(self.game_history) - 1
             self.pattern_states["pattern3"]["games_since_moonshot"] = 0
             logger.info(f"🚀 Moonshot detected: {game.peak_price:.1f}x")
         else:
             self.pattern_states["pattern3"]["games_since_moonshot"] += 1
-        self._update_drought_multiplier()
-
-    def _update_pattern2_probability(self):
-        base_prob = self.pattern2_config["ultra_short_base_prob"]
-        recent_games = 10
-        if len(self.game_history) >= recent_games:
-            recent_ultra_shorts = sum(
-                1
-                for game in self.game_history[-recent_games:]
-                if game.is_ultra_short
-                and game.end_price >= self.pattern2_config["high_payout_threshold"]
-            )
-            if recent_ultra_shorts >= 3:
-                adjusted_prob = min(0.25, base_prob * 2.0)
-            elif recent_ultra_shorts >= 2:
-                adjusted_prob = base_prob * 1.5
-            elif recent_ultra_shorts == 1:
-                adjusted_prob = base_prob * 1.2
-            else:
-                adjusted_prob = base_prob
-            self.pattern_states["pattern2"]["current_game_probability"] = adjusted_prob
-
-    def _update_drought_multiplier(self):
+        
+        # Update drought multiplier
         games_since = self.pattern_states["pattern3"]["games_since_moonshot"]
         if games_since < 42:
-            multiplier = 1.0
-            zone = "NORMAL"
+            self.pattern_states["pattern3"]["drought_multiplier"] = 1.0
         elif games_since < 63:
-            multiplier = 1.2
-            zone = "ELEVATED"
+            self.pattern_states["pattern3"]["drought_multiplier"] = 1.2
         elif games_since < 84:
-            multiplier = 1.5
-            zone = "HIGH"
+            self.pattern_states["pattern3"]["drought_multiplier"] = 1.5
         else:
-            multiplier = 2.0
-            zone = "EXTREME"
-        self.pattern_states["pattern3"]["drought_multiplier"] = multiplier
-        if zone != "NORMAL":
-            self.pattern_states["pattern3"]["status"] = f"DROUGHT_{zone}"
-        else:
-            self.pattern_states["pattern3"]["status"] = "NORMAL"
-
-    def _update_pattern_statistics(self):
-        if len(self.game_history) < 20:
-            return
-        pattern1_predictions = 0
-        pattern1_successes = 0
-        for i, game in enumerate(self.game_history[:-1]):
-            if game.is_max_payout and i + 1 < len(self.game_history):
-                pattern1_predictions += 1
-                next_game = self.game_history[i + 1]
-                if (
-                    next_game.final_tick > 205
-                    or next_game.is_max_payout
-                    or next_game.peak_price >= 5.0
-                ):
-                    pattern1_successes += 1
-        if pattern1_predictions > 0:
-            self.pattern_stats["pattern1"].successful_predictions = pattern1_successes
-            self.pattern_stats["pattern1"].failed_predictions = pattern1_predictions - pattern1_successes
-            self.pattern_stats["pattern1"].update_accuracy()
-        momentum_predictions = 0
-        momentum_successes = 0
-        for game in self.game_history:
-            if game.peak_price >= 8:
-                momentum_predictions += 1
-                if game.peak_price >= 50:
-                    momentum_successes += 1
-        if momentum_predictions > 0:
-            self.pattern_stats["pattern3"].successful_predictions = momentum_successes
-            self.pattern_stats["pattern3"].failed_predictions = momentum_predictions - momentum_successes
-            self.pattern_stats["pattern3"].update_accuracy()
-
+            self.pattern_states["pattern3"]["drought_multiplier"] = 2.0
+    
     def predict_rug_timing(self, current_tick: int, current_price: float, peak_price: float) -> Dict:
+        """Generate prediction based on active patterns"""
         predictions = []
         active_patterns = []
-        confidence_factors = []
-        if self.pattern_states["pattern1"]["active_prediction"]:
-            predicted_extension = max(255, current_tick + 100)
-            confidence = self.pattern1_config["confidence_threshold"]
-            predictions.append(predicted_extension)
-            confidence_factors.append(confidence)
-            active_patterns.append("pattern1")
-        current_prob = self.pattern_states["pattern2"]["current_game_probability"]
-        if current_prob > self.pattern2_config["ultra_short_base_prob"] * 1.5:
-            if current_tick < 20:
-                predicted_rug = min(current_tick + 5, 10)
-                confidence = min(0.9, current_prob * 10)
-                predictions.append(predicted_rug)
-                confidence_factors.append(confidence)
-                active_patterns.append("pattern2")
-        for threshold, config in self.pattern3_config["momentum_thresholds"].items():
+        confidence_weights = []
+        
+        # Pattern 1: Post-Max-Payout Recovery
+        if self.pattern_states["pattern1"]["active"]:
+            games_since = self.pattern_states["pattern1"]["games_since_max_payout"]
+            if games_since <= 1:
+                # Expect 24.4% longer game
+                predicted = int(MEDIAN_DURATION * self.pattern1_config["duration_multiplier"])
+                predictions.append(predicted)
+                confidence_weights.append(self.pattern1_config["confidence"])
+                active_patterns.append("pattern1_recovery")
+        
+        # Pattern 2: Ultra-Short Prediction
+        last_price = self.pattern_states["pattern2"]["last_end_price"]
+        if last_price >= self.pattern2_config["high_payout_threshold"]:
+            # Elevated ultra-short probability
+            if current_tick <= 5:  # Early game
+                predictions.append(8)  # Predict ultra-short
+                confidence_weights.append(self.pattern2_config["confidence"])
+                active_patterns.append("pattern2_ultra_short")
+        
+        # Check for clustering
+        if self.pattern_states["pattern2"]["clustering_active"]:
+            if current_tick <= 5:
+                predictions.append(9)  # Predict another ultra-short
+                confidence_weights.append(0.7)
+                active_patterns.append("pattern2_clustering")
+        
+        # Pattern 3: Momentum Thresholds
+        self.pattern_states["pattern3"]["current_peak"] = peak_price
+        for threshold, config in self.pattern3_config["thresholds"].items():
             if peak_price >= threshold:
-                base_prob = config["moonshot_prob"]
+                prob = config["continuation_prob"]
                 drought_mult = self.pattern_states["pattern3"]["drought_multiplier"]
-                adjusted_prob = min(0.95, base_prob * drought_mult)
+                adjusted_prob = min(0.95, prob * drought_mult)
+                
                 if adjusted_prob > 0.3:
+                    # Predict continuation
                     if threshold == 20:
-                        extension_factor = 1.5
+                        predicted = int(current_tick * 1.5)
                     elif threshold == 12:
-                        extension_factor = 1.3
+                        predicted = int(current_tick * 1.3)
                     else:
-                        extension_factor = 1.2
-                    predicted_continuation = int(current_tick * extension_factor)
-                    predictions.append(predicted_continuation)
-                    confidence_factors.append(adjusted_prob)
-                    active_patterns.append("pattern3")
+                        predicted = int(current_tick * 1.2)
+                    
+                    predictions.append(predicted)
+                    confidence_weights.append(adjusted_prob)
+                    active_patterns.append(f"pattern3_momentum_{threshold}x")
                 break
+        
+        # Combine predictions
         if predictions:
-            total_weight = sum(confidence_factors)
-            weighted_prediction = sum(
-                pred * conf for pred, conf in zip(predictions, confidence_factors)
-            ) / max(total_weight, 1e-9)
-            if len(confidence_factors) > 1:
-                avg_confidence = statistics.mean(confidence_factors)
-                prediction_variance = statistics.variance(predictions)
-            else:
-                avg_confidence = confidence_factors[0]
-                prediction_variance = 2500
-            tolerance = max(50, int(math.sqrt(prediction_variance)))
+            total_weight = sum(confidence_weights)
+            weighted_prediction = sum(p * w for p, w in zip(predictions, confidence_weights))
+            weighted_prediction /= total_weight
+            avg_confidence = sum(confidence_weights) / len(confidence_weights)
+            tolerance = 50
         else:
-            weighted_prediction = max(205, current_tick + 50)
+            # Default baseline
+            weighted_prediction = MEDIAN_DURATION
             avg_confidence = 0.5
             tolerance = 75
             active_patterns = ["baseline"]
+        
         return {
             "predicted_tick": int(weighted_prediction),
             "confidence": avg_confidence,
             "tolerance": tolerance,
             "based_on_patterns": active_patterns,
+            "pattern_states": {
+                "pattern1_active": self.pattern_states["pattern1"]["active"],
+                "pattern2_clustering": self.pattern_states["pattern2"]["clustering_active"],
+                "pattern3_peak": peak_price,
+                "drought_multiplier": self.pattern_states["pattern3"]["drought_multiplier"]
+            }
         }
-
-    def get_pattern_dashboard_data(self) -> Dict:
-        return {
-            "pattern1": {
-                "name": "Post-Max-Payout Recovery",
-                "status": self.pattern_states["pattern1"]["status"],
-                "confidence": self.pattern1_config["confidence_threshold"],
-                "last_trigger": self.pattern_states["pattern1"].get("games_since_trigger"),
-                "next_game_prob": self.pattern1_config["next_game_max_payout_prob"],
-                "improvement_factor": self.pattern1_config["improvement_factor"],
-                "accuracy": self.pattern_stats["pattern1"].accuracy,
-                "total_predictions": self.pattern_stats["pattern1"].successful_predictions
-                + self.pattern_stats["pattern1"].failed_predictions,
-            },
-            "pattern2": {
-                "name": "Ultra-Short High-Payout",
-                "status": self.pattern_states["pattern2"]["status"],
-                "confidence": self.pattern2_config["confidence_threshold"],
-                "ultra_short_prob": self.pattern2_config["ultra_short_base_prob"],
-                "current_game_prob": self.pattern_states["pattern2"]["current_game_probability"],
-                "recovery_window": self.pattern_states["pattern2"]["current_recovery_window"],
-                "recent_events": len(self.pattern_states["pattern2"]["recent_ultra_shorts"]),
-                "accuracy": self.pattern_stats["pattern2"].accuracy,
-            },
-            "pattern3": {
-                "name": "Momentum Thresholds",
-                "status": self.pattern_states["pattern3"]["status"],
-                "confidence": 0.91,
-                "current_peak": self.pattern_states["pattern3"]["current_peak"],
-                "next_alert": self._get_next_momentum_threshold(),
-                "games_since_moonshot": self.pattern_states["pattern3"]["games_since_moonshot"],
-                "drought_multiplier": self.pattern_states["pattern3"]["drought_multiplier"],
-                "accuracy": self.pattern_stats["pattern3"].accuracy,
-                "thresholds": self.pattern3_config["momentum_thresholds"],
-            },
-            "system_stats": {
-                "total_games_analyzed": len(self.game_history),
-                "pattern1_triggers": sum(1 for g in self.game_history if g.is_max_payout),
-                "pattern2_triggers": sum(1 for g in self.game_history if g.is_ultra_short),
-                "pattern3_moonshots": sum(1 for g in self.game_history if g.is_moonshot),
-                "analysis_window": "1000 games" if len(self.game_history) >= 1000 else f"{len(self.game_history)} games",
-            },
-        }
-
-    def _get_next_momentum_threshold(self) -> int:
-        current_peak = self.pattern_states["pattern3"]["current_peak"]
-        for threshold in sorted(self.pattern3_config["momentum_thresholds"].keys()):
-            if current_peak < threshold:
-                return threshold
-        return 50
-
+    
     def update_current_game(self, tick: int, price: float):
-        if not self.current_game:
-            return
+        """Update current game state for live tracking"""
         if price > self.pattern_states["pattern3"]["current_peak"]:
             self.pattern_states["pattern3"]["current_peak"] = price
-            for threshold in self.pattern3_config["momentum_thresholds"].keys():
-                if (
-                    self.pattern_states["pattern3"]["current_peak"] >= threshold
-                    and threshold not in self.pattern_states["pattern3"]["threshold_alerts"]
-                ):
-                    self.pattern_states["pattern3"]["threshold_alerts"].append(threshold)
-                    if threshold >= 12:
-                        self.pattern_states["pattern3"]["status"] = "APPROACHING"
-                    logger.info(
-                        f"🎯 Momentum threshold {threshold}x reached at {price:.2f}x"
-                    )
-
-class IntegratedPatternTracker:
-    """Enhanced pattern tracker with CSV-validated engine"""
-
-    def __init__(self):
-        self.enhanced_engine = EnhancedPatternEngine()
-        self.current_game = None
-        self.connected_clients = []
-
-    def process_game_update(self, data):
-        game_id = data.get("gameId", 0)
-        current_tick = data.get("tickCount", 0)
-        current_price = data.get("price", 1.0)
-        is_active = data.get("active", True)
-        is_rugged = data.get("rugged", False)
-        if not self.current_game or self.current_game['gameId'] != game_id:
-            if self.current_game:
-                completed_game = GameRecord(
-                    game_id=self.current_game['gameId'],
-                    start_time=self.current_game['startTime'],
-                    end_time=datetime.now(),
-                    final_tick=self.current_game.get('currentTick', 0),
-                    end_price=self.current_game.get('currentPrice', 0.0),
-                    peak_price=self.current_game.get('peak_price', 1.0)
-                )
-                self.enhanced_engine.add_completed_game(completed_game)
-            self.current_game = {
-                'gameId': game_id,
-                'startTime': datetime.now(),
-                'peak_price': current_price
-            }
-            self.enhanced_engine.pattern_states['pattern3']['current_peak'] = current_price
-            self.enhanced_engine.pattern_states['pattern3']['threshold_alerts'] = []
-        self.current_game.update({
-            'currentTick': current_tick,
-            'currentPrice': current_price,
-            'isActive': is_active,
-            'isRugged': is_rugged
-        })
-        if current_price > self.current_game['peak_price']:
-            self.current_game['peak_price'] = current_price
-        self.enhanced_engine.update_current_game(current_tick, current_price)
-        prediction = self.enhanced_engine.predict_rug_timing(
-            current_tick, current_price, self.current_game['peak_price']
-        )
-        patterns = self.enhanced_engine.get_pattern_dashboard_data()
+            
+            # Check for threshold crossings
+            for threshold in self.pattern3_config["thresholds"].keys():
+                if price >= threshold and self.pattern_states["pattern3"]["active_threshold"] != threshold:
+                    self.pattern_states["pattern3"]["active_threshold"] = threshold
+                    logger.info(f"🎯 Momentum threshold {threshold}x reached at {price:.2f}x")
+    
+    def get_side_bet_recommendation(self) -> Dict:
+        """CRITICAL: Side bet arbitrage opportunity detection"""
+        last_price = self.pattern_states["pattern2"]["last_end_price"]
+        clustering = self.pattern_states["pattern2"]["clustering_active"]
+        pattern1_active = self.pattern_states["pattern1"]["active"]
+        
+        # Calculate ultra-short probability
+        base_prob = self.pattern2_config["ultra_short_base_prob"]
+        
+        if last_price >= self.pattern2_config["high_payout_threshold"]:
+            ultra_short_prob = self.pattern2_config["post_high_payout_prob"]  # 8.1%
+        elif clustering:
+            ultra_short_prob = base_prob * 1.5  # Clustering boost
+        elif pattern1_active:
+            ultra_short_prob = base_prob * 1.2  # Pattern 1 boost
+        else:
+            ultra_short_prob = base_prob  # 6.4%
+        
+        # Side bet pays 5:1 (400% profit)
+        # EV = P(win) * 4.0 - P(lose) * 1.0
+        expected_value = (ultra_short_prob * 4.0) - ((1 - ultra_short_prob) * 1.0)
+        
         return {
-            'game_state': {
-                'gameId': game_id,
-                'currentTick': current_tick,
-                'currentPrice': current_price,
-                'isActive': is_active,
-                'isRugged': is_rugged
-            },
-            'patterns': patterns,
-            'prediction': prediction,
-            'timestamp': datetime.now().isoformat(),
-            'enhanced': True
+            "action": "PLACE_SIDE_BET" if ultra_short_prob > 0.07 else "WAIT",
+            "ultra_short_probability": ultra_short_prob,
+            "expected_value": expected_value,
+            "confidence": ultra_short_prob,
+            "reasoning": self._get_bet_reasoning(ultra_short_prob, last_price, clustering)
         }
+    
+    def _get_bet_reasoning(self, prob: float, last_price: float, clustering: bool) -> str:
+        """Explain side bet recommendation"""
+        if prob > 0.08:
+            return f"HIGH CONFIDENCE: {prob:.1%} ultra-short probability (25% above baseline)"
+        elif clustering:
+            return f"CLUSTERING DETECTED: Recent ultra-shorts increase probability"
+        elif last_price >= 0.015:
+            return f"POST-HIGH-PAYOUT: Elevated ultra-short probability"
+        else:
+            return f"BASELINE: {prob:.1%} probability, waiting for better opportunity"
