@@ -369,6 +369,19 @@ const TreasuryPatternDashboard = () => {
           <SideBetPanel sideBet={stickySideBet?.data} performance={sideBetPerf} capturedTick={stickySideBet?.tick} capturedAt={stickySideBet?.timestamp} />
         </div>
         <div className="col-span-8 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
+        {/* Side Bet Monitor */}
+        <div className="col-span-4 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
+          <div className="text-xs font-semibold mb-2">Side Bet Monitor</div>
+          <div className="grid grid-cols-2 gap-2 pr-1 text-[11px]">
+            <div className="flex items-center justify-between"><span className="text-gray-400">Eligible (tick ≤ 5)</span><span className="font-semibold">{(gameState?.currentTick || 0) <= 5 ? 'Yes' : 'No'}</span></div>
+            <div className="flex items-center justify-between"><span className="text-gray-400">Last Rec (this game)</span><span className="font-semibold">{stickySideBet ? (stickySideBet.tick + 't') : '—'}</span></div>
+            <div className="flex items-center justify-between"><span className="text-gray-400">Total Recs</span><span className="font-semibold">{sideBetPerf?.total_recommendations || 0}</span></div>
+            <div className="flex items-center justify-between"><span className="text-gray-400">Win/Loss</span><span className="font-semibold">{(sideBetPerf?.bets_won || 0)}/{(sideBetPerf?.bets_lost || 0)}</span></div>
+            <div className="flex items-center justify-between"><span className="text-gray-400">Positive EV</span><span className="font-semibold">{sideBetPerf?.positive_ev_bets || 0}</span></div>
+            <div className="flex items-center justify-between"><span className="text-gray-400">Total EV</span><span className="font-semibold">{(sideBetPerf?.total_ev || 0).toFixed ? (sideBetPerf.total_ev.toFixed(3)) : (sideBetPerf?.total_ev || 0)}</span></div>
+          </div>
+        </div>
+
           <div className="text-xs font-semibold mb-2 flex items-center"><Clock className="w-4 h-4 mr-1" /> Live Payload</div>
           <div className="max-h-32 overflow-auto">
             <pre className="text-[10px] whitespace-pre-wrap break-words break-all text-gray-300">{lastPayload ? JSON.stringify(lastPayload, null, 2) : 'Waiting for data…'}</pre>
