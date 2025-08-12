@@ -58,7 +58,7 @@ class SimpleLearningState:
     
     def update_accuracy(self, prediction: float, actual: float, tolerance: float = 50.0):
         """Track prediction accuracy"""
-        is_correct = abs(prediction - actual) &lt;= tolerance
+        is_correct = abs(prediction - actual) <= tolerance
         self.accuracy_window.append(is_correct)
         self.total_predictions += 1
         if is_correct:
