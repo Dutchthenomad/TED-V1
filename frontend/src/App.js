@@ -155,7 +155,32 @@ const TreasuryPatternDashboard = () => {
         </div>
 
         <div className="col-span-5 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
-          <div className="text-xs font-semibold mb-2">Live Tracking <span className="text-[10px] text-gray-400 ml-1">(Conformal band)</span></div>
+          <div className="flex items-center justify-between mb-2">
+            <div className="text-xs font-semibold">Live Tracking <span className="text-[10px] text-gray-400 ml-1">(Conformal band)</span></div>
+            {/* Average End Price mini-card with dropdown (header area) */}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-gray-400">Avg End (last</span>
+              <select
+                className="bg-gray-900 border border-gray-700 text-[10px] rounded px-1 py-0.5 focus:outline-none"
+                value={avgWindow}
+                onChange={(e) => setAvgWindow(Number(e.target.value))}
+              >
+                {[5,10,20,25,50,100].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+              <span className="text-[10px] text-gray-400">games):</span>
+              <span className="text-xs font-semibold text-blue-300">
+                {(() => {
+                  const recs = (predictionHistory || []).slice(-avgWindow);
+                  const usable = recs.filter(r => typeof r.end_price === 'number' && !isNaN(r.end_price));
+                  const count = usable.length;
+                  if (count === 0) return '—';
+                  const sum = usable.reduce((acc, r) => acc + Number(r.end_price), 0);
+                  return (sum / count).toFixed(6);
+                })()}
+              </span>
+            </div>
+          </div>
+
           <div className="relative h-5 bg-gray-700 rounded overflow-hidden">
             <div className="absolute top-0 h-full w-0.5 bg-white" style={{ left: `${Math.min(((gameState.currentTick || 0) / 600) * 100, 100)}%` }} />
             <div className="absolute top-0 h-full bg-blue-500/60" style={{ left: `${Math.min((((rugPrediction.predicted_tick || 0) - (rugPrediction.tolerance || 0)) / 600) * 100, 100)}%`, width: `${Math.min((((rugPrediction.tolerance || 0) * 2) / 600) * 100, 100)}%` }} />
