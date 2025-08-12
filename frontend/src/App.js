@@ -49,10 +49,7 @@ const TreasuryPatternDashboard = () => {
 
   // Monitoring and REST-enhanced state
   const [wsSystemStatus, setWsSystemStatus] = useState(null);
-  const [restStatus, setRestStatus] = useState(null);
   const monitoring = useSystemMonitoring({ wsSystemStatus, connectionStats });
-
-  const [restMetrics, setRestMetrics] = useState(null);
 
   const getBackendBaseHttp = () => {
     return process.env.REACT_APP_BACKEND_URL || '';
