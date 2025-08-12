@@ -101,3 +101,69 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+## user_problem_statement: "Integrate revised backend with validated pattern logic, ML gates, side-bet endpoints, and preserve legacy endpoints."
+## backend:
+##   - task: "Replace backend with clean-architecture server.py and engines; preserve /api/side-bet"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/backend/server.py"
+##     stuck_count: 0
+##     priority: "high"
+##     needs_retesting: true
+##     status_history:
+##         -working: "NA"
+##         -agent: "main"
+##         -comment: "Updated server.py with DB_NAME fallback, integrated IntegratedPatternTracker v2, preserved /api/side-bet and WS side_bet command; included metrics in /api/status."
+##   - task: "Install/ensure deps (motor, python-socketio, numpy/scipy present)"
+##     implemented: true
+##     working: true
+##     file: "/app/backend/requirements.txt"
+##     stuck_count: 0
+##     priority: "medium"
+##     needs_retesting: false
+##     status_history:
+##         -working: true
+##         -agent: "main"
+##         -comment: "Confirmed dependencies present; scipy retained."
+##   - task: "Update game_aware_ml_engine with ultra-short gate and classifier"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/backend/game_aware_ml_engine.py"
+##     stuck_count: 0
+##     priority: "high"
+##     needs_retesting: true
+##     status_history:
+##         -working: "NA"
+##         -agent: "main"
+##         -comment: "Rewrote engine with UltraShortClassifier, gate at tick<25, performance metrics surfaced in ml_status; aligned with server integration."
+## frontend:
+##   - task: "Ensure SideBetPanel still renders from WS or REST data"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/frontend/src/App.js"
+##     stuck_count: 0
+##     priority: "medium"
+##     needs_retesting: false
+##     status_history:
+##         -working: "NA"
+##         -agent: "main"
+##         -comment: "No changes required; backend preserves fields." 
+## metadata:
+##   created_by: "main_agent"
+##   version: "1.1"
+##   test_sequence: 1
+##   run_ui: false
+## test_plan:
+##   current_focus:
+##     - "GET /api/health"
+##     - "GET /api/status includes side_bet_performance"
+##     - "GET /api/patterns returns side_bet_recommendation when tick<=5"
+##     - "GET /api/side-bet returns recommendation and history"
+##     - "WS /api/ws initial payload contains fields"
+##   stuck_tasks: []
+##   test_all: false
+##   test_priority: "high_first"
+## agent_communication:
+##     -agent: "main"
+##     -message: "Please run backend tests for endpoints above and validate WS keepalive and side_bet command. No frontend automation unless requested."
