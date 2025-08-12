@@ -158,19 +158,43 @@
 ##         -working: "NA"
 ##         -agent: "main"
 ##         -comment: "No changes required; backend preserves fields." 
+##   - task: "Average End Price in Live Tracking with selectable window (5,10,20,25,50,100) default 20; compute from WS prediction_history only"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/frontend/src/App.js"
+##     stuck_count: 0
+##     priority: "high"
+##     needs_retesting: true
+##     status_history:
+##         -working: "NA"
+##         -agent: "main"
+##         -comment: "Added avgWindow dropdown in Live Tracking header; computes mean end_price over available records up to selected window; no persistence per user."
+##   - task: "Top Bar ML badges: show prediction_method and active modules badges"
+##     implemented: true
+##     working: "NA"
+##     file: "/app/frontend/src/App.js"
+##     stuck_count: 0
+##     priority: "medium"
+##     needs_retesting: true
+##     status_history:
+##         -working: "NA"
+##         -agent: "main"
+##         -comment: "App Top Bar now shows Method and badges (hazard/gate/conformal); Performance panel kept intact."
 ## metadata:
 ##   created_by: "main_agent"
-##   version: "1.1"
-##   test_sequence: 1
+##   version: "1.2"
+##   test_sequence: 2
 ##   run_ui: false
 ## test_plan:
-##   current_focus: []
+##   current_focus:
+##     - "Average End Price in Live Tracking"
+##     - "Top Bar ML badges"
 ##   stuck_tasks: []
 ##   test_all: false
 ##   test_priority: "high_first"
 ## agent_communication:
 ##     -agent: "main"
-##     -message: "Please run backend tests for endpoints above and validate WS keepalive and side_bet command. No frontend automation unless requested."
+##     -message: "Backend unchanged; please re-run quick smoke on all /api endpoints and WS connect to ensure no regressions. Frontend: new Average End Price dropdown in Live Tracking and Top Bar ML badges added. Awaiting approval to run automated frontend tests."
 ##     -agent: "testing"
 ##     -message: "✅ BACKEND TESTING COMPLETE: All 7 required endpoints from review request are fully functional. Health endpoint returns correct status 'healthy' and version '2.0.0'. Status endpoint includes all required sections (system, connections, statistics, ml, side_bet_performance). Patterns endpoint returns proper structure with patterns/prediction/side_bet_recommendation/ml_status. Side-bet endpoint provides recommendation/performance/history. Prediction-history returns records/metrics. History returns games array. Metrics returns all required sections. WebSocket connects successfully, receives initial payload with required keys (game_state, patterns, prediction, ml_status), and responds to ping command with pong. No 5xx errors encountered. All schema/field requirements met. Backend is production-ready."
 ##     -agent: "testing"
