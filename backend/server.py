@@ -313,7 +313,14 @@ class IntegratedPatternTracker:
 
 # Initialize tracker
 pattern_tracker = IntegratedPatternTracker()
-connected_clients: List[WebSocket] = []
+# Use enhanced connection manager
+try:
+    from core.connection_manager import ConnectionManager
+    connection_manager = ConnectionManager(max_connections=int(os.getenv('MAX_WEBSOCKET_CONNECTIONS', '100')), message_queue_size=int(os.getenv('WS_MESSAGE_QUEUE_SIZE', '1000')))
+except Exception:
+    connection_manager = None
+
+connected_clients: List[WebSocket] = []  # Legacy list retained for compatibility
 system_stats = {
     'start_time': datetime.now(),
     'total_connections': 0,
