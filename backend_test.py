@@ -337,6 +337,22 @@ class RugsPatternAPITester:
         except Exception as e:
             return self.log_test("WebSocket Connection", False, f"Error: {str(e)}")
 
+    def test_status_checks_get(self):
+        """Test GET /api/status-checks - should return an array (can be empty)"""
+        try:
+            response = requests.get(f"{self.base_url}/api/status-checks", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, list):
+                    details = f"Array with {len(data)} items"
+                    return self.log_test("Status-Checks GET", True, details)
+                else:
+                    return self.log_test("Status-Checks GET", False, f"Expected array, got {type(data)}")
+            else:
+                return self.log_test("Status-Checks GET", False, f"Status code: {response.status_code}")
+        except Exception as e:
+            return self.log_test("Status-Checks GET", False, f"Error: {str(e)}")
+
     def run_all_tests(self):
         """Run all backend tests as per review request"""
         print("🚀 Starting Backend API Tests - Review Request Verification")
