@@ -187,7 +187,7 @@
 ##   run_ui: false
 ## test_plan:
 ##   current_focus:
-##     - "Average End Price in Live Tracking"
+##     - "Average End Price card below Live Tracking"
 ##     - "Top Bar ML badges"
 ##   stuck_tasks: []
 ##   test_all: false
