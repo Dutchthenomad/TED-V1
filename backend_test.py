@@ -350,14 +350,30 @@ class RugsPatternAPITester:
         print("\n2) Testing GET /api/status...")
         self.test_status_endpoint()
         
-        print("\n3) Testing GET /api/status-checks...")
+        print("\n3) Testing GET /api/patterns...")
+        self.test_patterns_endpoint()
+        
+        print("\n4) Testing GET /api/side-bet...")
+        self.test_side_bet_endpoint()
+        
+        print("\n5) Testing GET /api/prediction-history...")
+        self.test_prediction_history_endpoint()
+        
+        print("\n6) Testing GET /api/history...")
+        self.test_history_endpoint()
+        
+        print("\n7) Testing GET /api/metrics...")
+        self.test_metrics_endpoint()
+        
+        print("\n8) Testing WebSocket /api/ws...")
+        self.test_websocket_connection()
+        
+        # Legacy endpoints for completeness
+        print("\n   Testing GET /api/status-checks...")
         self.test_status_checks_get()
         
         print("\n   Testing POST /api/status-checks...")
         self.test_status_checks_post()
-        
-        print("\n4) Testing WebSocket connection...")
-        self.test_websocket_connection()
         
         # Summary
         print("=" * 60)
