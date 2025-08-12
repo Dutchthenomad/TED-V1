@@ -130,6 +130,16 @@ const TreasuryPatternDashboard = () => {
           <CompactValue label="Tick" value={gameState.currentTick} />
           <CompactValue label="Price" value={`${Number(gameState.currentPrice || 0).toFixed(3)}x`} />
           <CompactValue label="Version" value={version || '—'} />
+          {/* Top Bar ML method and module badges */}
+          <div className="hidden sm:flex items-center gap-2 min-w-0">
+            <span className="text-[10px] text-gray-400 whitespace-nowrap">Method:</span>
+            <span className="text-[10px] text-blue-300 truncate max-w-[120px]">{predictionMethod}</span>
+            <div className="flex items-center gap-1 flex-wrap">
+              <ModuleBadge label="hazard" active={!!modules?.hazard} />
+              <ModuleBadge label="gate" active={!!modules?.gate} />
+              <ModuleBadge label="conformal" active={!!modules?.conformal} />
+            </div>
+          </div>
         </div>
       </div>
 
