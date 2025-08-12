@@ -131,11 +131,11 @@
 ##         -comment: "Confirmed dependencies present; scipy retained."
 ##   - task: "Integrate hazard+conformal+ultra-short gate wrapper and drift hooks"
 ##     implemented: true
-##     working: "NA"
+##     working: true
 ##     file: "/app/backend/game_aware_ml_engine.py"
 ##     stuck_count: 0
 ##     priority: "high"
-##     needs_retesting: true
+##     needs_retesting: false
 ##     status_history:
 ##         -working: "NA"
 ##         -agent: "main"
@@ -143,6 +143,9 @@
 ##         -working: true
 ##         -agent: "testing"
 ##         -comment: "✅ ML ENGINE WORKING: ML status endpoint returns proper structure with learning engine performance metrics, ultra-short classifier status, and system health indicators. All ML-enhanced predictions functioning correctly through /api/patterns endpoint."
+##         -working: true
+##         -agent: "testing"
+##         -comment: "✅ HAZARD/CONFORMAL/GATE INTEGRATION VALIDATED: All new modules (hazard_head.py, conformal_wrapper.py, drift_detectors.py, ultra_short_gate.py) import successfully without errors. /api/patterns returns all required prediction dict keys (predicted_tick, tolerance, confidence, based_on_patterns) with tolerance >= 1 and properly widened values (150). ML status shows prediction_method='hazard+conformal+gate' with modules enabled. WebSocket /api/ws initial payload includes prediction and ml_status, ping/status commands work correctly. complete_game_analysis runs without exception - system remains stable. Side-bet endpoints unchanged. All review request requirements satisfied."
 ## frontend:
 ##   - task: "Ensure SideBetPanel still renders from WS or REST data"
 ##     implemented: true
