@@ -378,7 +378,7 @@ const TreasuryPatternDashboard = () => {
             <div className="flex items-center justify-between"><span className="text-gray-400">Total Recs</span><span className="font-semibold">{sideBetPerf?.total_recommendations || 0}</span></div>
             <div className="flex items-center justify-between"><span className="text-gray-400">Win/Loss</span><span className="font-semibold">{(sideBetPerf?.bets_won || 0)}/{(sideBetPerf?.bets_lost || 0)}</span></div>
             <div className="flex items-center justify-between"><span className="text-gray-400">Positive EV</span><span className="font-semibold">{sideBetPerf?.positive_ev_bets || 0}</span></div>
-            <div className="flex items-center justify-between"><span className="text-gray-400">Total EV</span><span className="font-semibold">{(sideBetPerf?.total_ev || 0).toFixed ? (sideBetPerf.total_ev.toFixed(3)) : (sideBetPerf?.total_ev || 0)}</span></div>
+            <div className="flex items-center justify-between"><span className="text-gray-400">Total EV</span><span className="font-semibold">{typeof sideBetPerf?.total_ev === 'number' ? Number(sideBetPerf.total_ev).toFixed(3) : '0.000'}</span></div>
           </div>
         </div>
 
