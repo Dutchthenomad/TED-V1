@@ -45,6 +45,10 @@ const TreasuryPatternDashboard = () => {
   const [sideBetPerf, setSideBetPerf] = useState(null);
   const [version, setVersion] = useState(null);
   const [avgEndWindow, setAvgEndWindow] = useState(20); // Average End Price window (default 20)
+  // Sticky side bet per game
+  const [stickySideBet, setStickySideBet] = useState(null);
+  const [stickyGameId, setStickyGameId] = useState(null);
+
   const [avgDiffWindow, setAvgDiffWindow] = useState(20); // Average Diff window (default 20)
 
   // Monitoring and REST-enhanced state
