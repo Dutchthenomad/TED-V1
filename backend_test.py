@@ -13,7 +13,7 @@ import threading
 from datetime import datetime
 
 class RugsPatternAPITester:
-    def __init__(self, base_url="https://2b29bbbb-435d-451e-bcfa-d28119e501cf.preview.emergentagent.com"):
+    def __init__(self, base_url="https://4c0451c0-fea0-470b-9160-6db670847956.preview.emergentagent.com"):
         self.base_url = base_url
         self.tests_run = 0
         self.tests_passed = 0
