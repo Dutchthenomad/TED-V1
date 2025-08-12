@@ -169,7 +169,7 @@
 ##         -working: "NA"
 ##         -agent: "main"
 ##         -comment: "Added avgWindow dropdown in Live Tracking header; computes mean end_price over available records up to selected window; no persistence per user."
-##   - task: "Top Bar ML badges: show prediction_method and active modules badges"
+##   - task: "Top Bar ML badges: show prediction_method and active modules badges (kept Performance panel)"
 ##     implemented: true
 ##     working: "NA"
 ##     file: "/app/frontend/src/App.js"
