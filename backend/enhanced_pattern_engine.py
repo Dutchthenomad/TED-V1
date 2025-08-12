@@ -39,7 +39,7 @@ class GameRecord:
             self.total_duration_ms = int((self.end_time - self.start_time).total_seconds() * 1000)
         
         # Validated pattern detection
-        self.is_ultra_short = self.final_tick &lt;= 10
+        self.is_ultra_short = self.final_tick <= 10
         self.is_max_payout = self.end_price &gt;= 0.019
         self.is_moonshot = self.peak_price &gt;= 50.0
 
