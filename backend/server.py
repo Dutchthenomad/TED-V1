@@ -580,7 +580,7 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "rugs_connected": rugs_client.connected,
+        "rugs_connected": bool(rugs_client and rugs_client.connected),
         "version": "2.0.0",
     }
 
