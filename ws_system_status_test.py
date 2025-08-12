@@ -10,7 +10,7 @@ import time
 import threading
 
 class WebSocketSystemStatusTester:
-    def __init__(self, base_url="https://pattern-prophet-2.preview.emergentagent.com"):
+    def __init__(self, base_url="https://treasury-insight-1.preview.emergentagent.com"):
         self.base_url = base_url
         self.ws_messages = []
         self.ws_connected = False

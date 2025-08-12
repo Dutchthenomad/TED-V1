@@ -11,7 +11,7 @@ import threading
 
 def test_prediction_history_schema():
     """Test that WebSocket initial payload includes prediction_history array with end_price fields"""
-    base_url = "https://pattern-prophet-2.preview.emergentagent.com"
+    base_url = "https://treasury-insight-1.preview.emergentagent.com"
     ws_url = base_url.replace('https://', 'wss://') + '/api/ws'
     
     messages = []
@@ -116,7 +116,7 @@ def main():
     # Test 1: Health endpoint
     print("1) Testing GET /api/health for version 2.0.0...")
     try:
-        response = requests.get("https://pattern-prophet-2.preview.emergentagent.com/api/health", timeout=10)
+        response = requests.get("https://treasury-insight-1.preview.emergentagent.com/api/health", timeout=10)
         if response.status_code == 200:
             data = response.json()
             if data.get('status') == 'healthy' and data.get('version') == '2.0.0':
@@ -131,7 +131,7 @@ def main():
     # Test 2: Status endpoint
     print("\n2) Testing GET /api/status for required sections...")
     try:
-        response = requests.get("https://pattern-prophet-2.preview.emergentagent.com/api/status", timeout=10)
+        response = requests.get("https://treasury-insight-1.preview.emergentagent.com/api/status", timeout=10)
         if response.status_code == 200:
             data = response.json()
             required_sections = ['system', 'connections', 'statistics', 'ml', 'side_bet_performance']
