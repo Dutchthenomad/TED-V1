@@ -176,7 +176,7 @@ class IntegratedPatternTracker:
         })
         
         # Track peak price
-        if current_price &gt; self.current_game['peak_price']:
+        if current_price > self.current_game['peak_price']:
             self.current_game['peak_price'] = current_price
         
         # Update pattern engines
