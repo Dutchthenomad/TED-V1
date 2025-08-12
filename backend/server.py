@@ -598,7 +598,7 @@ async def get_system_status():
             "start_time": system_stats['start_time'].isoformat(),
         },
         "connections": {
-            "rugs_backend": rugs_client.connected,
+            "rugs_backend": bool(rugs_client and rugs_client.connected),
             "frontend_clients": len(connected_clients),
             "total_connections": system_stats['total_connections'],
             "reconnect_attempts": rugs_client.reconnect_attempts,
