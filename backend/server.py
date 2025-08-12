@@ -465,13 +465,22 @@ async def shutdown_event():
 
 @app.websocket("/api/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time updates"""
-    await websocket.accept()
-    connected_clients.append(websocket)
-    system_stats['total_connections'] += 1
-    
+    """WebSocket endpoint for real-time updates (compat + ConnectionManager)"""
     client_ip = websocket.client.host if websocket.client else "unknown"
-    logger.info(f"📱 Client connected from {client_ip}. Total: {len(connected_clients)}")
+
+    # If ConnectionManager available, use it; else fallback to legacy list
+    if connection_manager:
+        accepted = await connection_manager.connect(websocket, {"client_ip": client_ip})
+        if not accepted:
+            await websocket.close(code=1008, reason="Max connections reached")
+            return
+        system_stats['total_connections'] += 1
+        logger.info(f"📱 Client connected from {client_ip}. Total: {connection_manager.metrics['current_connections']}")
+    else:
+        await websocket.accept()
+        connected_clients.append(websocket)
+        system_stats['total_connections'] += 1
+        logger.info(f"📱 Client connected from {client_ip}. Total: {len(connected_clients)}")
     
     try:
         # Send initial state if available
@@ -502,7 +511,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     return o.isoformat()
                 return str(o)
             
-            await websocket.send_text(json.dumps(initial_state, default=_default))
+            if connection_manager:
+                await connection_manager.send_personal(websocket, initial_state)
+            else:
+                await websocket.send_text(json.dumps(initial_state, default=_default))
         
         # Handle incoming messages
         while True:
@@ -510,33 +522,43 @@ async def websocket_endpoint(websocket: WebSocket):
                 msg = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                 
                 if msg == 'ping':
-                    await websocket.send_text(json.dumps({
-                        "type": "pong", 
-                        "timestamp": datetime.now().isoformat()
-                    }))
+                    payload = {"type": "pong", "timestamp": datetime.now().isoformat()}
+                    if connection_manager:
+                        await connection_manager.update_heartbeat(websocket)
+                        await connection_manager.send_personal(websocket, payload)
+                    else:
+                        await websocket.send_text(json.dumps(payload))
                 elif msg == 'status':
                     status = await get_system_status()
-                    await websocket.send_text(json.dumps(status))
+                    if connection_manager:
+                        await connection_manager.send_personal(websocket, status)
+                    else:
+                        await websocket.send_text(json.dumps(status))
                 elif msg == 'side_bet':
-                    # Get current side bet recommendation
                     side_bet = pattern_tracker.enhanced_engine.get_side_bet_recommendation()
-                    await websocket.send_text(json.dumps({
-                        "type": "side_bet_recommendation",
-                        "data": side_bet,
-                        "timestamp": datetime.now().isoformat()
-                    }))
-                    
+                    payload = {"type": "side_bet_recommendation", "data": side_bet, "timestamp": datetime.now().isoformat()}
+                    if connection_manager:
+                        await connection_manager.send_personal(websocket, payload)
+                    else:
+                        await websocket.send_text(json.dumps(payload))
             except asyncio.TimeoutError:
-                # Send keepalive
-                await websocket.send_text(json.dumps({"type": "keepalive"}))
+                keepalive = {"type": "keepalive"}
+                if connection_manager:
+                    await connection_manager.send_personal(websocket, keepalive)
+                    await connection_manager.update_heartbeat(websocket)
+                else:
+                    await websocket.send_text(json.dumps(keepalive))
                 
     except WebSocketDisconnect:
-        logger.info(f"📱 Client disconnected from {client_ip}. Total: {len(connected_clients) - 1}")
+        logger.info(f"📱 Client disconnected from {client_ip}.")
     except Exception as e:
         logger.error(f"❌ WebSocket error for {client_ip}: {e}")
     finally:
-        if websocket in connected_clients:
-            connected_clients.remove(websocket)
+        if connection_manager:
+            await connection_manager.disconnect(websocket)
+        else:
+            if websocket in connected_clients:
+                connected_clients.remove(websocket)
 
 # API Endpoints
 
