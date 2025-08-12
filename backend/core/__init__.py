@@ -1,0 +1,1 @@
+"""Core infrastructure package (connection manager, monitoring, database stubs)."""
