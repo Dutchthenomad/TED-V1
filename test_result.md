@@ -195,9 +195,7 @@
 ##   test_sequence: 3
 ##   run_ui: true
 ## test_plan:
-##   current_focus:
-##     - "Average End Price card below Live Tracking"
-##     - "Top Bar ML badges"
+##   current_focus: []
 ##   stuck_tasks: []
 ##   test_all: false
 ##   test_priority: "high_first"
