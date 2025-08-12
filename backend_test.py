@@ -239,15 +239,21 @@ class RugsPatternAPITester:
         print("🔗 WebSocket connected")
         
         # Send ping after connection
-        def send_ping():
+        def send_commands():
             time.sleep(1)
             ws.send('ping')
             print("📤 Sent ping")
+            time.sleep(1)
+            ws.send('status')
+            print("📤 Sent status")
+            time.sleep(1)
+            ws.send('side_bet')
+            print("📤 Sent side_bet")
         
-        threading.Thread(target=send_ping).start()
+        threading.Thread(target=send_commands).start()
 
     def test_websocket_connection(self):
-        """Test WebSocket: connect to ws://localhost:8001/api/ws, await initial JSON, then send 'ping' to receive 'pong' or receive periodic keepalive within 30s"""
+        """Test WebSocket: connect, receive initial payload with game_state/patterns/prediction/ml_status, test ping/status/side_bet commands"""
         try:
             ws_url = self.base_url.replace('https://', 'wss://').replace('http://', 'ws://') + '/api/ws'
             print(f"🔌 Connecting to WebSocket: {ws_url}")
@@ -270,6 +276,8 @@ class RugsPatternAPITester:
             start_time = time.time()
             initial_json_received = False
             ping_response_received = False
+            status_response_received = False
+            side_bet_response_received = False
             
             while time.time() - start_time < timeout:
                 if self.ws_error:
@@ -277,24 +285,37 @@ class RugsPatternAPITester:
                     return self.log_test("WebSocket Connection", False, f"Connection error: {self.ws_error}")
                 
                 if self.ws_connected and self.ws_messages:
-                    # Check for initial JSON message
+                    # Check for initial JSON message with required keys
                     if not initial_json_received:
                         for msg in self.ws_messages:
                             if isinstance(msg, dict) and msg.get('type') != 'pong':
-                                initial_json_received = True
-                                print("📨 Received initial JSON state")
-                                break
+                                # Check for required keys in initial payload
+                                required_keys = ['game_state', 'patterns', 'prediction', 'ml_status']
+                                if any(key in msg for key in required_keys):
+                                    initial_json_received = True
+                                    print("📨 Received initial JSON state with required keys")
+                                    break
                     
-                    # Check for pong or keepalive response
+                    # Check for command responses
                     for msg in self.ws_messages:
                         if isinstance(msg, dict):
-                            if msg.get('type') in ['pong', 'keepalive']:
+                            if msg.get('type') == 'pong':
                                 ping_response_received = True
-                                ws.close()
-                                details = f"Received {msg.get('type')} response"
-                                if initial_json_received:
-                                    details += ", Initial JSON received"
-                                return self.log_test("WebSocket Connection", True, details)
+                                print("📨 Received pong response")
+                            elif msg.get('type') == 'side_bet_recommendation':
+                                side_bet_response_received = True
+                                print("📨 Received side_bet_recommendation response")
+                            elif 'system' in msg or 'connections' in msg:  # status response
+                                status_response_received = True
+                                print("📨 Received status response")
+                
+                # Check if we have all responses
+                if ping_response_received and status_response_received and side_bet_response_received:
+                    ws.close()
+                    details = f"All commands responded: ping✓, status✓, side_bet✓"
+                    if initial_json_received:
+                        details += ", Initial JSON✓"
+                    return self.log_test("WebSocket Connection", True, details)
                 
                 time.sleep(0.5)
             
@@ -303,11 +324,15 @@ class RugsPatternAPITester:
             if not self.ws_connected:
                 return self.log_test("WebSocket Connection", False, "Failed to connect within timeout")
             elif not initial_json_received:
-                return self.log_test("WebSocket Connection", False, "No initial JSON received within timeout")
+                return self.log_test("WebSocket Connection", False, "No initial JSON with required keys received")
             elif not ping_response_received:
-                return self.log_test("WebSocket Connection", False, "No ping response or keepalive received within timeout")
+                return self.log_test("WebSocket Connection", False, "No pong response received")
+            elif not status_response_received:
+                return self.log_test("WebSocket Connection", False, "No status response received")
+            elif not side_bet_response_received:
+                return self.log_test("WebSocket Connection", False, "No side_bet response received")
             else:
-                return self.log_test("WebSocket Connection", False, "Timeout waiting for response")
+                return self.log_test("WebSocket Connection", False, "Timeout waiting for all responses")
                 
         except Exception as e:
             return self.log_test("WebSocket Connection", False, f"Error: {str(e)}")
