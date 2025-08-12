@@ -32,7 +32,7 @@ class RugsPatternAPITester:
         return success
 
     def test_health_endpoint(self):
-        """Test GET /api/health - should return 200 JSON with keys: status, rugs_connected, timestamp, version"""
+        """Test GET /api/health - should return status healthy and version 2.0.0"""
         try:
             response = requests.get(f"{self.base_url}/api/health", timeout=10)
             if response.status_code == 200:
@@ -43,7 +43,14 @@ class RugsPatternAPITester:
                 if missing_keys:
                     return self.log_test("Health Endpoint", False, f"Missing keys: {missing_keys}")
                 
-                details = f"Status: {data.get('status')}, Rugs Connected: {data.get('rugs_connected')}, Version: {data.get('version')}"
+                # Check specific values as per review request
+                if data.get('status') != 'healthy':
+                    return self.log_test("Health Endpoint", False, f"Status is '{data.get('status')}', expected 'healthy'")
+                
+                if data.get('version') != '2.0.0':
+                    return self.log_test("Health Endpoint", False, f"Version is '{data.get('version')}', expected '2.0.0'")
+                
+                details = f"Status: {data.get('status')}, Version: {data.get('version')}, Rugs Connected: {data.get('rugs_connected')}"
                 return self.log_test("Health Endpoint", True, details)
             else:
                 return self.log_test("Health Endpoint", False, f"Status code: {response.status_code}")
