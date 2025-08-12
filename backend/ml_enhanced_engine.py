@@ -65,10 +65,10 @@ class SimpleLearningState:
             self.correct_predictions += 1
         
         # Simple weight adjustment based on recent performance
-        if len(self.accuracy_window) &gt;= 20:
+        if len(self.accuracy_window) >= 20:
             recent_accuracy = sum(self.accuracy_window) / len(self.accuracy_window)
             # Adjust pattern weights slightly based on performance
-            if recent_accuracy &gt; 0.7:
+            if recent_accuracy > 0.7:
                 # Performing well, slightly increase weights
                 for key in self.pattern_weights:
                     if key != 'baseline':
@@ -79,7 +79,7 @@ class SimpleLearningState:
                     if key != 'baseline':
                         self.pattern_weights[key] = max(0.5, self.pattern_weights[key] * 0.99)
     
-    def get_accuracy(self) -&gt; float:
+    def get_accuracy(self) -> float:
         if self.total_predictions == 0:
             return 0.5
         return self.correct_predictions / self.total_predictions
@@ -92,7 +92,7 @@ class ValidatedFeatureExtractor:
         self.tick_history = deque(maxlen=100)
     
     def extract_features(self, current_game_state: Dict, pattern_states: Dict, 
-                        game_history: List) -&gt; ValidatedFeatures:
+                        game_history: List) -> ValidatedFeatures:
         """Extract only validated features"""
         features = ValidatedFeatures()
         
@@ -104,28 +104,28 @@ class ValidatedFeatureExtractor:
         # Pattern 1 features
         pattern1_state = pattern_states.get('pattern1', {})
         features.games_since_pattern1 = pattern1_state.get('games_since_max_payout', 999)
-        features.pattern1_triggered = features.games_since_pattern1 &lt;= 1
+        features.pattern1_triggered = features.games_since_pattern1 <= 1
         
         # Pattern 2 features
         pattern2_state = pattern_states.get('pattern2', {})
         features.last_game_end_price = pattern2_state.get('last_end_price', 0.0)
         recent_ultra_shorts = pattern2_state.get('recent_ultra_shorts', [])
         features.ultra_short_cluster_count = len(recent_ultra_shorts)
-        features.last_game_ultra_short = len(recent_ultra_shorts) &gt; 0
+        features.last_game_ultra_short = len(recent_ultra_shorts) > 0
         
         # Pattern 3 features
-        features.crossed_8x = features.current_peak &gt;= 8
-        features.crossed_12x = features.current_peak &gt;= 12
-        features.crossed_20x = features.current_peak &gt;= 20
+        features.crossed_8x = features.current_peak >= 8
+        features.crossed_12x = features.current_peak >= 12
+        features.crossed_20x = features.current_peak >= 20
         pattern3_state = pattern_states.get('pattern3', {})
         features.games_since_moonshot = pattern3_state.get('games_since_moonshot', 999)
         
         # Calculate tick percentile
-        if game_history and len(game_history) &gt; 10:
+        if game_history and len(game_history) > 10:
             final_ticks = [getattr(g, 'final_tick', 0) for g in game_history[-100:]]
-            final_ticks = [t for t in final_ticks if t &gt; 0]
+            final_ticks = [t for t in final_ticks if t > 0]
             if final_ticks:
-                below_count = sum(1 for t in final_ticks if t &lt; features.current_tick)
+                below_count = sum(1 for t in final_ticks if t < features.current_tick)
                 features.tick_percentile = below_count / len(final_ticks)
         
         return features
@@ -137,7 +137,7 @@ class SimpleLearningEngine:
         self.state = SimpleLearningState()
         self.performance_tracker = deque(maxlen=200)
     
-    def predict_with_features(self, features: ValidatedFeatures, base_predictions: Dict[str, float]) -&gt; Dict:
+    def predict_with_features(self, features: ValidatedFeatures, base_predictions: Dict[str, float]) -> Dict:
         """Combine pattern predictions with simple weighting"""
         try:
             # Calculate pattern-based adjustments
@@ -152,7 +152,7 @@ class SimpleLearningEngine:
                 weighted_prediction += prediction * weight
                 total_weight += weight
             
-            if total_weight &gt; 0:
+            if total_weight > 0:
                 weighted_prediction /= total_weight
             
             # Apply pattern adjustments
@@ -180,7 +180,7 @@ class SimpleLearningEngine:
                 'fallback_used': True
             }
     
-    def _calculate_pattern_adjustments(self, features: ValidatedFeatures) -&gt; float:
+    def _calculate_pattern_adjustments(self, features: ValidatedFeatures) -> float:
         """Calculate adjustments based on validated patterns"""
         adjustment = 0.0
         
@@ -190,10 +190,10 @@ class SimpleLearningEngine:
             adjustment += MEDIAN_DURATION * 0.244
         
         # Pattern 2: Ultra-short clustering
-        if features.ultra_short_cluster_count &gt;= 2:
+        if features.ultra_short_cluster_count >= 2:
             # High clustering, expect more ultra-shorts
             adjustment -= (features.current_tick * 0.5)  # Predict shorter
-        elif features.last_game_end_price &gt;= 0.015:
+        elif features.last_game_end_price >= 0.015:
             # Post-high-payout, slight ultra-short boost
             adjustment -= 20
         
@@ -209,16 +209,16 @@ class SimpleLearningEngine:
             adjustment += features.current_tick * 0.2
         
         # Drought effect
-        if features.games_since_moonshot &gt; 84:
+        if features.games_since_moonshot > 84:
             adjustment *= 1.5  # Extreme drought multiplier
-        elif features.games_since_moonshot &gt; 63:
+        elif features.games_since_moonshot > 63:
             adjustment *= 1.3  # High drought
-        elif features.games_since_moonshot &gt; 42:
+        elif features.games_since_moonshot > 42:
             adjustment *= 1.1  # Elevated drought
         
         return adjustment
     
-    def _calculate_confidence(self, features: ValidatedFeatures) -&gt; float:
+    def _calculate_confidence(self, features: ValidatedFeatures) -> float:
         """Calculate confidence based on active patterns"""
         confidence = 0.5  # Base confidence
         
@@ -226,29 +226,29 @@ class SimpleLearningEngine:
         if features.pattern1_triggered:
             confidence += 0.15
         
-        if features.ultra_short_cluster_count &gt;= 2:
+        if features.ultra_short_cluster_count >= 2:
             confidence += 0.1
         
         if features.crossed_8x or features.crossed_12x or features.crossed_20x:
             confidence += 0.2
         
         # Adjust for accuracy
-        if self.state.total_predictions &gt; 20:
+        if self.state.total_predictions > 20:
             accuracy_bonus = (self.state.get_accuracy() - 0.5) * 0.3
             confidence += accuracy_bonus
         
         return max(0.1, min(0.95, confidence))
     
-    def _get_active_patterns(self, features: ValidatedFeatures) -&gt; List[str]:
+    def _get_active_patterns(self, features: ValidatedFeatures) -> List[str]:
         """Identify active patterns"""
         active = []
         
         if features.pattern1_triggered:
             active.append("pattern1_recovery")
         
-        if features.ultra_short_cluster_count &gt;= 2:
+        if features.ultra_short_cluster_count >= 2:
             active.append("pattern2_clustering")
-        elif features.last_game_end_price &gt;= 0.015:
+        elif features.last_game_end_price >= 0.015:
             active.append("pattern2_post_high_payout")
         
         if features.crossed_20x:
@@ -283,7 +283,7 @@ class SimpleLearningEngine:
         except Exception as e:
             logger.error(f"Error updating weights: {e}")
     
-    def get_performance_metrics(self) -&gt; Dict:
+    def get_performance_metrics(self) -> Dict:
         """Get current performance metrics"""
         return {
             'overall_accuracy': self.state.get_accuracy(),
@@ -308,7 +308,7 @@ class MLEnhancedPatternEngine:
         """Update current game state"""
         self.base_engine.update_current_game(tick, price)
     
-    def predict_rug_timing(self, current_tick: int, current_price: float, peak_price: float) -&gt; Dict:
+    def predict_rug_timing(self, current_tick: int, current_price: float, peak_price: float) -> Dict:
         """Generate enhanced prediction"""
         try:
             # Get base prediction
@@ -336,7 +336,7 @@ class MLEnhancedPatternEngine:
             base_predictions = {
                 'baseline': base_prediction.get('predicted_tick', MEDIAN_DURATION),
                 'pattern1': MEDIAN_DURATION * 1.244 if features.pattern1_triggered else MEDIAN_DURATION,
-                'pattern2': 8 if features.ultra_short_cluster_count &gt;= 2 else current_tick + 30,
+                'pattern2': 8 if features.ultra_short_cluster_count >= 2 else current_tick + 30,
                 'pattern3': int(current_tick * 1.3) if features.crossed_8x else current_tick + 20
             }
             
@@ -392,7 +392,7 @@ class MLEnhancedPatternEngine:
         except Exception as e:
             logger.error(f"Error in game analysis: {e}")
     
-    def get_ml_status(self) -&gt; Dict:
+    def get_ml_status(self) -> Dict:
         """Get current ML status"""
         return {
             'ml_enabled': self.ml_enabled,
