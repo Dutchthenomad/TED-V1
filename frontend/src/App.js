@@ -19,6 +19,7 @@ const TreasuryPatternDashboard = () => {
   const [patterns, setPatterns] = useState({});
   const [rugPrediction, setRugPrediction] = useState({ predicted_tick: 200, confidence: 0.5, tolerance: 50, based_on_patterns: [] });
   const [mlStatus, setMlStatus] = useState(null);
+  const [predictionHistory, setPredictionHistory] = useState([]);
   const [connectionStats, setConnectionStats] = useState({ totalUpdates: 0, lastError: null, uptime: 0 });
   const [lastPayload, setLastPayload] = useState(null);
 
@@ -39,6 +40,7 @@ const TreasuryPatternDashboard = () => {
           if (data.patterns) setPatterns(data.patterns);
           if (data.prediction) setRugPrediction(data.prediction);
           if (data.ml_status) setMlStatus(data.ml_status);
+          if (data.prediction_history) setPredictionHistory(data.prediction_history);
           setLastPayload(data);
           setLastUpdate(new Date());
           setConnectionStats(prev => ({ ...prev, totalUpdates: prev.totalUpdates + 1 }));
@@ -83,6 +85,11 @@ const TreasuryPatternDashboard = () => {
     </tr>
   );
 
+  const DiffBadge = ({ diff }) => {
+    const color = diff <= 25 ? 'text-green-400' : diff <= 75 ? 'text-yellow-400' : 'text-red-400';
+    return <span className={`font-semibold ${color}`}>{diff}</span>;
+  };
+
   return (
     <div className="min-h-screen bg-gray-900 text-white p-2">
       {/* Top Bar */}
@@ -101,9 +108,9 @@ const TreasuryPatternDashboard = () => {
         </div>
       </div>
 
-      {/* One-screen grid layout (no vertical scroll on 1080p) */}
+      {/* Grid rows */}
       <div className="grid grid-cols-12 gap-2 mt-2">
-        {/* Prediction */}
+        {/* Row 1 */}
         <div className="col-span-3 bg-gray-800 border border-gray-700 rounded p-2">
           <div className="text-xs font-semibold mb-2 flex items-center"><Target className="w-4 h-4 mr-1" /> Prediction</div>
           <div className="grid grid-cols-2 gap-2">
@@ -114,8 +121,6 @@ const TreasuryPatternDashboard = () => {
           </div>
           <div className="mt-2 text-[10px] text-gray-400 truncate">Based on: {rugPrediction?.based_on_patterns?.join(', ')}</div>
         </div>
-
-        {/* Live Bar */}
         <div className="col-span-5 bg-gray-800 border border-gray-700 rounded p-2">
           <div className="text-xs font-semibold mb-2">Live Tracking</div>
           <div className="relative h-6 bg-gray-700 rounded">
@@ -127,8 +132,6 @@ const TreasuryPatternDashboard = () => {
             <span>0</span><span>Tick {gameState.currentTick}</span><span>{rugPrediction.predicted_tick} ±{rugPrediction.tolerance}</span><span>600+</span>
           </div>
         </div>
-
-        {/* ML Insights */}
         <div className="col-span-4 bg-gray-800 border border-gray-700 rounded p-2">
           <div className="text-xs font-semibold mb-2">ML Insights</div>
           {rugPrediction?.ml_enhancement ? (
@@ -143,20 +146,10 @@ const TreasuryPatternDashboard = () => {
           ) : (
             <div className="text-[10px] text-gray-400">Awaiting ML data…</div>
           )}
-          {rugPrediction?.ml_enhancement?.key_features && (
-            <div className="mt-2 text-[10px] text-gray-400">
-              <div className="font-semibold mb-1">Key Features</div>
-              <div className="grid grid-cols-3 gap-2">
-                {Object.entries(rugPrediction.ml_enhancement.key_features).map(([k, v]) => (
-                  <div key={k} className="flex justify-between"><span>{k}</span><span className="text-gray-300">{typeof v === 'number' ? v.toFixed(2) : v}</span></div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Patterns Table */}
-        <div className="col-span-7 bg-gray-800 border border-gray-700 rounded p-2">
+        {/* Row 2 */}
+        <div className="col-span-5 bg-gray-800 border border-gray-700 rounded p-2">
           <div className="text-xs font-semibold mb-2 flex items-center"><TrendingUp className="w-4 h-4 mr-1" /> Patterns</div>
           <table className="w-full text-left border-separate border-spacing-y-1">
             <thead>
@@ -171,9 +164,7 @@ const TreasuryPatternDashboard = () => {
             </tbody>
           </table>
         </div>
-
-        {/* Weights / System */}
-        <div className="col-span-5 bg-gray-800 border border-gray-700 rounded p-2">
+        <div className="col-span-3 bg-gray-800 border border-gray-700 rounded p-2">
           <div className="text-xs font-semibold mb-2">Weights & System</div>
           <div className="grid grid-cols-2 gap-2 text-xs">
             {mlStatus?.learning_engine?.feature_weights && Object.entries(mlStatus.learning_engine.feature_weights).map(([k, v]) => (
@@ -182,9 +173,39 @@ const TreasuryPatternDashboard = () => {
           </div>
           <div className="mt-2 text-[10px] text-gray-400">Errors: {mlStatus?.system_health?.errors || 0} • Last: {mlStatus?.system_health?.last_error || '—'}</div>
         </div>
+        <div className="col-span-4 bg-gray-800 border border-gray-700 rounded p-2">
+          <div className="text-xs font-semibold mb-2">Prediction History</div>
+          <table className="w-full text-left">
+            <thead>
+              <tr className="text-[10px] text-gray-400">
+                <th className="px-2">Game</th>
+                <th className="px-2">Pred</th>
+                <th className="px-2">Actual</th>
+                <th className="px-2">Diff</th>
+                <th className="px-2">Peak</th>
+                <th className="px-2">End</th>
+              </tr>
+            </thead>
+            <tbody className="text-[11px]">
+              {predictionHistory && predictionHistory.slice().reverse().slice(0, 10).map((r) => (
+                <tr key={`${r.game_id}-${r.timestamp}`}>
+                  <td className="px-2 py-1 text-gray-300 truncate max-w-[100px]" title={r.game_id}>{String(r.game_id).slice(-8)}</td>
+                  <td className="px-2 py-1">{r.predicted_tick}</td>
+                  <td className="px-2 py-1">{r.actual_tick}</td>
+                  <td className="px-2 py-1"><DiffBadge diff={Math.abs((r.predicted_tick || 0) - (r.actual_tick || 0))} /></td>
+                  <td className="px-2 py-1">{Number(r.peak_price || 0).toFixed(2)}x</td>
+                  <td className="px-2 py-1">{Number(r.end_price || 0).toFixed(6)}</td>
+                </tr>
+              ))}
+              {(!predictionHistory || predictionHistory.length === 0) && (
+                <tr><td colSpan={6} className="px-2 py-1 text-[10px] text-gray-500">No history yet…</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
 
-        {/* Raw Payload */}
-        <div className="col-span-12 bg-gray-800 border border-gray-700 rounded p-2 max-h-48 overflow-auto">
+        {/* Row 3 */}
+        <div className="col-span-12 bg-gray-800 border border-gray-700 rounded p-2 max-h-32 overflow-auto">
           <div className="text-xs font-semibold mb-2 flex items-center"><Clock className="w-4 h-4 mr-1" /> Live Payload</div>
           <pre className="text-[10px] whitespace-pre-wrap text-gray-300">{lastPayload ? JSON.stringify(lastPayload, null, 2) : 'Waiting for data…'}</pre>
         </div>

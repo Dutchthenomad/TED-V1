@@ -12,6 +12,7 @@ from datetime import datetime
 import asyncio
 import json
 import socketio
+from collections import deque
 
 # Load env
 ROOT_DIR = Path(__file__).parent
@@ -96,6 +97,7 @@ class MLIntegratedTracker:
         self.enhanced_engine = EnhancedPatternEngine()
         self.ml_engine = GameAwareMLPatternEngine(self.enhanced_engine)
         self.current_game = None
+        self.prediction_history = deque(maxlen=200)
 
     def process_game_update(self, data):
         game_id = data.get('gameId', 0)
@@ -113,7 +115,28 @@ class MLIntegratedTracker:
                     end_price=self.current_game.get('currentPrice', 0.0),
                     peak_price=self.current_game.get('peak_price', 1.0)
                 )
+                # Record prediction vs actual before updating ML
+                last_pred = getattr(self.ml_engine, '_last_prediction', None)
+                try:
+                    if last_pred:
+                        predicted_tick = int(last_pred.get('predicted_tick') or last_pred.get('prediction') or 0)
+                        actual_tick = int(completed_game.final_tick)
+                        diff = abs(predicted_tick - actual_tick)
+                        record = {
+                            'game_id': completed_game.game_id,
+                            'predicted_tick': predicted_tick,
+                            'actual_tick': actual_tick,
+                            'diff': diff,
+                            'peak_price': completed_game.peak_price,
+                            'end_price': completed_game.end_price,
+                            'timestamp': datetime.now().isoformat()
+                        }
+                        self.prediction_history.append(record)
+                except Exception as e:
+                    logger.error(f"Failed to append prediction history: {e}")
+                # Update ML engine with completed game
                 self.ml_engine.complete_game_analysis(completed_game)
+            # Start new game
             self.current_game = {
                 'gameId': game_id,
                 'startTime': datetime.now(),
@@ -121,6 +144,7 @@ class MLIntegratedTracker:
             }
             self.enhanced_engine.pattern_states['pattern3']['current_peak'] = current_price
             self.enhanced_engine.pattern_states['pattern3']['threshold_alerts'] = []
+        # Update current game state
         self.current_game.update({
             'currentTick': current_tick,
             'currentPrice': current_price,
@@ -129,6 +153,7 @@ class MLIntegratedTracker:
         })
         if current_price > self.current_game['peak_price']:
             self.current_game['peak_price'] = current_price
+        # Update engines
         self.enhanced_engine.update_current_game(current_tick, current_price)
         self.ml_engine.update_current_game(current_tick, current_price)
         prediction = self.ml_engine.predict_rug_timing(current_tick, current_price, self.current_game['peak_price'])
@@ -144,6 +169,7 @@ class MLIntegratedTracker:
             'patterns': patterns,
             'prediction': prediction,
             'ml_status': self.ml_engine.get_ml_status(),
+            'prediction_history': list(self.prediction_history)[-20:],
             'timestamp': datetime.now().isoformat(),
             'enhanced': True
         }
@@ -279,6 +305,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     pattern_tracker.current_game.get('peak_price', 1.0)
                 ),
                 'ml_status': pattern_tracker.ml_engine.get_ml_status(),
+                'prediction_history': list(pattern_tracker.prediction_history)[-20:],
                 'system_status': {
                     'rugs_connected': rugs_client.connected,
                     'uptime_seconds': int((datetime.now() - system_stats['start_time']).total_seconds()),
@@ -364,6 +391,7 @@ async def get_current_patterns():
             "patterns": patterns,
             "prediction": prediction,
             "ml_status": pattern_tracker.ml_engine.get_ml_status(),
+            "prediction_history": list(pattern_tracker.prediction_history)[-20:],
             "current_game": pattern_tracker.current_game,
             "timestamp": datetime.now().isoformat(),
         }
@@ -395,6 +423,15 @@ async def get_game_history(limit: int = 100):
         }
     except Exception as e:
         logger.error(f"Error getting history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/prediction-history")
+async def get_prediction_history(limit: int = 50):
+    try:
+        records = list(pattern_tracker.prediction_history)[-limit:]
+        return {"records": records, "total": len(pattern_tracker.prediction_history), "limit": limit}
+    except Exception as e:
+        logger.error(f"Error getting prediction history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/metrics")
