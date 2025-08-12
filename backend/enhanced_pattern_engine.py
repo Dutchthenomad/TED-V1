@@ -58,6 +58,7 @@ class PatternStatistics:
 
 class EnhancedPatternEngine:
     """Advanced pattern detection with statistical models"""
+
     def __init__(self):
         self.game_history: List[GameRecord] = []
         self.current_game: Optional[GameRecord] = None
@@ -66,6 +67,7 @@ class EnhancedPatternEngine:
             "pattern2": PatternStatistics(),
             "pattern3": PatternStatistics(),
         }
+
         self.pattern1_config = {
             "trigger_value": 0.020000000000000018,
             "next_game_max_payout_prob": 0.211,
@@ -73,6 +75,7 @@ class EnhancedPatternEngine:
             "expected_duration_increase": 50,
             "confidence_threshold": 0.85,
         }
+
         self.pattern2_config = {
             "high_payout_threshold": 0.015,
             "ultra_short_base_prob": 0.081,
@@ -81,6 +84,7 @@ class EnhancedPatternEngine:
             "recovery_improvement": [0.15, 0.18],
             "confidence_threshold": 0.78,
         }
+
         self.pattern3_config = {
             "momentum_thresholds": {
                 8: {"moonshot_prob": 0.244, "target_multiplier": 50},
@@ -95,6 +99,7 @@ class EnhancedPatternEngine:
                 "extreme": 2.0,
             },
         }
+
         self.pattern_states = {
             "pattern1": {
                 "status": "NORMAL",
@@ -254,9 +259,9 @@ class EnhancedPatternEngine:
             self.pattern_stats["pattern3"].update_accuracy()
 
     def predict_rug_timing(self, current_tick: int, current_price: float, peak_price: float) -> Dict:
-        predictions: List[int] = []
-        active_patterns: List[str] = []
-        confidence_factors: List[float] = []
+        predictions = []
+        active_patterns = []
+        confidence_factors = []
         if self.pattern_states["pattern1"]["active_prediction"]:
             predicted_extension = max(255, current_tick + 100)
             confidence = self.pattern1_config["confidence_threshold"]
@@ -379,17 +384,13 @@ class EnhancedPatternEngine:
                         f"🎯 Momentum threshold {threshold}x reached at {price:.2f}x"
                     )
 
-# Integration with the main pattern tracker + ML layer
-from typing import Any
-from ml_enhanced_engine import MLEnhancedPatternEngine
-
 class IntegratedPatternTracker:
-    """Enhanced pattern tracker that integrates EnhancedPatternEngine + ML layer"""
+    """Enhanced pattern tracker with CSV-validated engine"""
+
     def __init__(self):
         self.enhanced_engine = EnhancedPatternEngine()
-        self.ml_engine = MLEnhancedPatternEngine(self.enhanced_engine)
-        self.current_game: Optional[Dict[str, Any]] = None
-        self.connected_clients: List = []
+        self.current_game = None
+        self.connected_clients = []
 
     def process_game_update(self, data):
         game_id = data.get("gameId", 0)
@@ -397,55 +398,47 @@ class IntegratedPatternTracker:
         current_price = data.get("price", 1.0)
         is_active = data.get("active", True)
         is_rugged = data.get("rugged", False)
-        if not self.current_game or self.current_game["gameId"] != game_id:
+        if not self.current_game or self.current_game['gameId'] != game_id:
             if self.current_game:
-                from enhanced_pattern_engine import GameRecord  # local import to avoid circular
                 completed_game = GameRecord(
-                    game_id=self.current_game["gameId"],
-                    start_time=self.current_game["startTime"],
+                    game_id=self.current_game['gameId'],
+                    start_time=self.current_game['startTime'],
                     end_time=datetime.now(),
-                    final_tick=self.current_game.get("currentTick", 0),
-                    end_price=self.current_game.get("currentPrice", 0.0),
-                    peak_price=self.current_game.get("peak_price", 1.0),
+                    final_tick=self.current_game.get('currentTick', 0),
+                    end_price=self.current_game.get('currentPrice', 0.0),
+                    peak_price=self.current_game.get('peak_price', 1.0)
                 )
-                # Update both engines
-                self.ml_engine.complete_game_analysis(completed_game)
+                self.enhanced_engine.add_completed_game(completed_game)
             self.current_game = {
-                "gameId": game_id,
-                "startTime": datetime.now(),
-                "peak_price": current_price,
+                'gameId': game_id,
+                'startTime': datetime.now(),
+                'peak_price': current_price
             }
-            self.enhanced_engine.pattern_states["pattern3"]["current_peak"] = current_price
-            self.enhanced_engine.pattern_states["pattern3"]["threshold_alerts"] = []
-        self.current_game.update(
-            {
-                "currentTick": current_tick,
-                "currentPrice": current_price,
-                "isActive": is_active,
-                "isRugged": is_rugged,
-            }
-        )
-        if current_price > self.current_game["peak_price"]:
-            self.current_game["peak_price"] = current_price
-        # Update engines
+            self.enhanced_engine.pattern_states['pattern3']['current_peak'] = current_price
+            self.enhanced_engine.pattern_states['pattern3']['threshold_alerts'] = []
+        self.current_game.update({
+            'currentTick': current_tick,
+            'currentPrice': current_price,
+            'isActive': is_active,
+            'isRugged': is_rugged
+        })
+        if current_price > self.current_game['peak_price']:
+            self.current_game['peak_price'] = current_price
         self.enhanced_engine.update_current_game(current_tick, current_price)
-        self.ml_engine.update_current_game(current_tick, current_price)
-        # ML-enhanced prediction
-        prediction = self.ml_engine.predict_rug_timing(
-            current_tick, current_price, self.current_game["peak_price"]
+        prediction = self.enhanced_engine.predict_rug_timing(
+            current_tick, current_price, self.current_game['peak_price']
         )
         patterns = self.enhanced_engine.get_pattern_dashboard_data()
         return {
-            "game_state": {
-                "gameId": game_id,
-                "currentTick": current_tick,
-                "currentPrice": current_price,
-                "isActive": is_active,
-                "isRugged": is_rugged,
+            'game_state': {
+                'gameId': game_id,
+                'currentTick': current_tick,
+                'currentPrice': current_price,
+                'isActive': is_active,
+                'isRugged': is_rugged
             },
-            "patterns": patterns,
-            "prediction": prediction,
-            "ml_status": self.ml_engine.get_ml_status(),
-            "timestamp": datetime.now().isoformat(),
-            "enhanced": True,
+            'patterns': patterns,
+            'prediction': prediction,
+            'timestamp': datetime.now().isoformat(),
+            'enhanced': True
         }
