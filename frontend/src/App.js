@@ -19,6 +19,13 @@ const ModuleBadge = ({ label, active }) => (
     {label}
   </span>
 );
+const StatLine = ({ label, value, accent }) => (
+  <div className="flex items-center justify-between text-[11px]">
+    <span className="text-gray-400 mr-2 truncate">{label}</span>
+    <span className={`font-semibold ${accent || ''}`}>{value}</span>
+  </div>
+);
+
 
 const TreasuryPatternDashboard = () => {
   const [isConnected, setIsConnected] = useState(false);
