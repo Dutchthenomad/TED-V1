@@ -58,7 +58,6 @@ class PatternStatistics:
 
 class EnhancedPatternEngine:
     """Advanced pattern detection with statistical models"""
-
     def __init__(self):
         self.game_history: List[GameRecord] = []
         self.current_game: Optional[GameRecord] = None
@@ -67,7 +66,6 @@ class EnhancedPatternEngine:
             "pattern2": PatternStatistics(),
             "pattern3": PatternStatistics(),
         }
-
         self.pattern1_config = {
             "trigger_value": 0.020000000000000018,
             "next_game_max_payout_prob": 0.211,
@@ -75,7 +73,6 @@ class EnhancedPatternEngine:
             "expected_duration_increase": 50,
             "confidence_threshold": 0.85,
         }
-
         self.pattern2_config = {
             "high_payout_threshold": 0.015,
             "ultra_short_base_prob": 0.081,
@@ -84,7 +81,6 @@ class EnhancedPatternEngine:
             "recovery_improvement": [0.15, 0.18],
             "confidence_threshold": 0.78,
         }
-
         self.pattern3_config = {
             "momentum_thresholds": {
                 8: {"moonshot_prob": 0.244, "target_multiplier": 50},
@@ -99,7 +95,6 @@ class EnhancedPatternEngine:
                 "extreme": 2.0,
             },
         }
-
         self.pattern_states = {
             "pattern1": {
                 "status": "NORMAL",
@@ -134,7 +129,7 @@ class EnhancedPatternEngine:
         self._analyze_pattern3_trigger(game_record)
         self._update_pattern_statistics()
         logger.info(
-            f"\U0001F4CA Game #{game_record.game_id} analyzed: Duration: {game_record.final_tick}t, End: {game_record.end_price:.6f}, Peak: {game_record.peak_price:.2f}x"
+            f"📊 Game #{game_record.game_id} analyzed: Duration: {game_record.final_tick}t, End: {game_record.end_price:.6f}, Peak: {game_record.peak_price:.2f}x"
         )
 
     def _analyze_pattern1_trigger(self, game: GameRecord):
@@ -143,7 +138,7 @@ class EnhancedPatternEngine:
             self.pattern_states["pattern1"]["games_since_trigger"] = 0
             self.pattern_states["pattern1"]["status"] = "TRIGGERED"
             self.pattern_states["pattern1"]["active_prediction"] = True
-            logger.info(f"\U0001F3AF Pattern 1 TRIGGERED: Max payout detected {game.end_price}")
+            logger.info(f"🎯 Pattern 1 TRIGGERED: Max payout detected {game.end_price}")
         else:
             if self.pattern_states["pattern1"].get("games_since_trigger") is not None:
                 self.pattern_states["pattern1"]["games_since_trigger"] += 1
@@ -169,7 +164,7 @@ class EnhancedPatternEngine:
             self.pattern_states["pattern2"]["current_recovery_window"] = 3
             self.pattern_states["pattern2"]["active_recovery"] = True
             logger.info(
-                f"\u26A1 Pattern 2 TRIGGERED: Ultra-short {game.end_price} at {game.final_tick}t"
+                f"⚡ Pattern 2 TRIGGERED: Ultra-short {game.end_price} at {game.final_tick}t"
             )
         if self.pattern_states["pattern2"]["current_recovery_window"] > 0:
             self.pattern_states["pattern2"]["current_recovery_window"] -= 1
@@ -182,7 +177,7 @@ class EnhancedPatternEngine:
         if game.is_moonshot:
             self.pattern_states["pattern3"]["last_moonshot_game"] = len(self.game_history) - 1
             self.pattern_states["pattern3"]["games_since_moonshot"] = 0
-            logger.info(f"\U0001F680 Moonshot detected: {game.peak_price:.1f}x")
+            logger.info(f"🚀 Moonshot detected: {game.peak_price:.1f}x")
         else:
             self.pattern_states["pattern3"]["games_since_moonshot"] += 1
         self._update_drought_multiplier()
@@ -262,7 +257,6 @@ class EnhancedPatternEngine:
         predictions: List[int] = []
         active_patterns: List[str] = []
         confidence_factors: List[float] = []
-
         if self.pattern_states["pattern1"]["active_prediction"]:
             predicted_extension = max(255, current_tick + 100)
             confidence = self.pattern1_config["confidence_threshold"]
@@ -382,15 +376,19 @@ class EnhancedPatternEngine:
                     if threshold >= 12:
                         self.pattern_states["pattern3"]["status"] = "APPROACHING"
                     logger.info(
-                        f"\U0001F3AF Momentum threshold {threshold}x reached at {price:.2f}x"
+                        f"🎯 Momentum threshold {threshold}x reached at {price:.2f}x"
                     )
 
-class IntegratedPatternTracker:
-    """Enhanced pattern tracker that integrates EnhancedPatternEngine"""
+# Integration with the main pattern tracker + ML layer
+from typing import Any
+from ml_enhanced_engine import MLEnhancedPatternEngine
 
+class IntegratedPatternTracker:
+    """Enhanced pattern tracker that integrates EnhancedPatternEngine + ML layer"""
     def __init__(self):
         self.enhanced_engine = EnhancedPatternEngine()
-        self.current_game = None
+        self.ml_engine = MLEnhancedPatternEngine(self.enhanced_engine)
+        self.current_game: Optional[Dict[str, Any]] = None
         self.connected_clients: List = []
 
     def process_game_update(self, data):
@@ -401,6 +399,7 @@ class IntegratedPatternTracker:
         is_rugged = data.get("rugged", False)
         if not self.current_game or self.current_game["gameId"] != game_id:
             if self.current_game:
+                from enhanced_pattern_engine import GameRecord  # local import to avoid circular
                 completed_game = GameRecord(
                     game_id=self.current_game["gameId"],
                     start_time=self.current_game["startTime"],
@@ -409,7 +408,8 @@ class IntegratedPatternTracker:
                     end_price=self.current_game.get("currentPrice", 0.0),
                     peak_price=self.current_game.get("peak_price", 1.0),
                 )
-                self.enhanced_engine.add_completed_game(completed_game)
+                # Update both engines
+                self.ml_engine.complete_game_analysis(completed_game)
             self.current_game = {
                 "gameId": game_id,
                 "startTime": datetime.now(),
@@ -427,8 +427,11 @@ class IntegratedPatternTracker:
         )
         if current_price > self.current_game["peak_price"]:
             self.current_game["peak_price"] = current_price
+        # Update engines
         self.enhanced_engine.update_current_game(current_tick, current_price)
-        prediction = self.enhanced_engine.predict_rug_timing(
+        self.ml_engine.update_current_game(current_tick, current_price)
+        # ML-enhanced prediction
+        prediction = self.ml_engine.predict_rug_timing(
             current_tick, current_price, self.current_game["peak_price"]
         )
         patterns = self.enhanced_engine.get_pattern_dashboard_data()
@@ -442,6 +445,7 @@ class IntegratedPatternTracker:
             },
             "patterns": patterns,
             "prediction": prediction,
+            "ml_status": self.ml_engine.get_ml_status(),
             "timestamp": datetime.now().isoformat(),
             "enhanced": True,
         }

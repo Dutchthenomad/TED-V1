@@ -2,6 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { AlertCircle, TrendingUp, Clock, Target, Wifi, WifiOff } from 'lucide-react';
 
+const CompactValue = ({ label, value, accent }) => (
+  <div className="flex flex-col">
+    <span className="text-[10px] text-gray-400">{label}</span>
+    <span className={`text-sm font-semibold ${accent || ''}`}>{value}</span>
+  </div>
+);
+
 const TreasuryPatternDashboard = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
@@ -13,27 +20,16 @@ const TreasuryPatternDashboard = () => {
     currentTick: 0,
     currentPrice: 1.0,
     isActive: false,
-    isRugged: false
+    isRugged: false,
+    peak_price: 1.0,
   });
 
-  const [patterns, setPatterns] = useState({
-    pattern1: { name: 'Post-Max-Payout Recovery', status: 'NORMAL', confidence: 0.85, last_trigger: null, next_game_prob: 0.211 },
-    pattern2: { name: 'Ultra-Short High-Payout', status: 'NORMAL', confidence: 0.78, ultra_short_prob: 0.081, current_game_prob: 0.15 },
-    pattern3: { name: 'Momentum Thresholds', status: 'NORMAL', confidence: 0.91, current_peak: 1.0, next_alert: 8 }
-  });
+  const [patterns, setPatterns] = useState({});
+  const [rugPrediction, setRugPrediction] = useState({ predicted_tick: 200, confidence: 0.5, tolerance: 50, based_on_patterns: [] });
+  const [mlStatus, setMlStatus] = useState(null);
 
-  const [rugPrediction, setRugPrediction] = useState({
-    predicted_tick: 200,
-    confidence: 0.5,
-    tolerance: 50,
-    based_on_patterns: []
-  });
-
-  const [connectionStats, setConnectionStats] = useState({
-    totalUpdates: 0,
-    lastError: null,
-    uptime: 0
-  });
+  const [connectionStats, setConnectionStats] = useState({ totalUpdates: 0, lastError: null, uptime: 0 });
+  const [lastPayload, setLastPayload] = useState(null);
 
   const getBackendBase = () => {
     const base = process.env.REACT_APP_BACKEND_URL || '';
@@ -44,34 +40,30 @@ const TreasuryPatternDashboard = () => {
     try {
       const wsUrl = `${getBackendBase()}/api/ws`;
       wsRef.current = new WebSocket(wsUrl);
-
       wsRef.current.onopen = () => {
         setIsConnected(true);
         setConnectionStats(prev => ({ ...prev, lastError: null }));
       };
-
       wsRef.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.game_state) setGameState(data.game_state);
+          if (data.game_state) setGameState(prev => ({ ...prev, ...data.game_state }));
           if (data.patterns) setPatterns(data.patterns);
           if (data.prediction) setRugPrediction(data.prediction);
+          if (data.ml_status) setMlStatus(data.ml_status);
+          setLastPayload(data);
           setLastUpdate(new Date());
           setConnectionStats(prev => ({ ...prev, totalUpdates: prev.totalUpdates + 1 }));
         } catch (err) {
           setConnectionStats(prev => ({ ...prev, lastError: `Parse error: ${err.message}` }));
         }
       };
-
       wsRef.current.onerror = () => {
         setConnectionStats(prev => ({ ...prev, lastError: 'Connection error' }));
       };
-
       wsRef.current.onclose = () => {
         setIsConnected(false);
-        reconnectTimeoutRef.current = setTimeout(() => {
-          connectWebSocket();
-        }, 3000);
+        reconnectTimeoutRef.current = setTimeout(() => { connectWebSocket(); }, 1500);
       };
     } catch (err) {
       setConnectionStats(prev => ({ ...prev, lastError: `Connection failed: ${err.message}` }));
@@ -80,230 +72,143 @@ const TreasuryPatternDashboard = () => {
 
   useEffect(() => {
     connectWebSocket();
-    return () => {
-      if (wsRef.current) wsRef.current.close();
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-    };
+    return () => { if (wsRef.current) wsRef.current.close(); if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current); };
   }, []);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (isConnected) setConnectionStats(prev => ({ ...prev, uptime: prev.uptime + 1 }));
-    }, 1000);
+    const interval = setInterval(() => { if (isConnected) setConnectionStats(prev => ({ ...prev, uptime: prev.uptime + 1 })); }, 1000);
     return () => clearInterval(interval);
   }, [isConnected]);
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'TRIGGERED': return 'bg-red-500';
-      case 'MONITORING': return 'bg-yellow-500';
-      case 'APPROACHING': return 'bg-orange-500';
-      case 'NORMAL': return 'bg-green-500';
-      case 'EXCEEDED': return 'bg-purple-500';
-      default: return 'bg-gray-500';
+      case 'TRIGGERED': return 'text-red-400';
+      case 'MONITORING': return 'text-yellow-400';
+      case 'APPROACHING': return 'text-orange-400';
+      case 'NORMAL': return 'text-green-400';
+      default: return 'text-gray-400';
     }
   };
 
-  const getPatternIcon = (patternKey) => {
-    switch (patternKey) {
-      case 'pattern1': return <TrendingUp className="w-5 h-5" />;
-      case 'pattern2': return <Clock className="w-5 h-5" />;
-      case 'pattern3': return <Target className="w-5 h-5" />;
-      default: return <AlertCircle className="w-5 h-5" />;
-    }
-  };
-
-  const formatUptime = (seconds) => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return `${hours}h ${minutes}m ${secs}s`;
-  };
+  const PatternRow = ({ label, p }) => (
+    <tr className="text-xs">
+      <td className="px-2 py-1 text-gray-300">{label}</td>
+      <td className={`px-2 py-1 font-semibold ${getStatusColor(p?.status)}`}>{p?.status || '—'}</td>
+      <td className="px-2 py-1">{((p?.confidence || 0) * 100).toFixed(0)}%</td>
+      <td className="px-2 py-1">{(p?.current_peak || p?.ultra_short_prob || p?.next_game_prob || 0).toFixed ? (p?.current_peak || 0).toFixed(1) : `${((p?.ultra_short_prob || p?.next_game_prob || 0) * 100).toFixed(1)}%`}</td>
+      <td className="px-2 py-1">{p?.next_alert || p?.recovery_window || p?.last_trigger || '—'}</td>
+    </tr>
+  );
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-6">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-4">Treasury Pattern Tracker MVP</h1>
-        <div className="bg-gray-800 rounded-lg p-4 mb-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-2">
-                {isConnected ? (
-                  <Wifi className="w-5 h-5 text-green-500" />
-                ) : (
-                  <WifiOff className="w-5 h-5 text-red-500" />
-                )}
-                <span className={`font-medium ${isConnected ? 'text-green-400' : 'text-red-400'}`}>
-                  {isConnected ? 'CONNECTED' : 'DISCONNECTED'}
-                </span>
-              </div>
-              {isConnected && (
-                <>
-                  <span className="text-sm text-gray-400">•</span>
-                  <span className="text-sm text-gray-400">Uptime: {formatUptime(connectionStats.uptime)}</span>
-                  <span className="text-sm text-gray-400">•</span>
-                  <span className="text-sm text-gray-400">Updates: {connectionStats.totalUpdates}</span>
-                </>
-              )}
-            </div>
-            <div className="text-right">
-              <div className="text-sm text-gray-400">Game #{gameState.gameId} • Tick: {gameState.currentTick}</div>
-              {lastUpdate && (
-                <div className="text-xs text-gray-500">Last update: {lastUpdate.toLocaleTimeString()}</div>
-              )}
-            </div>
-          </div>
-          {connectionStats.lastError && (
-            <div className="mt-2 text-sm text-red-400">Error: {connectionStats.lastError}</div>
-          )}
+    <div className="min-h-screen bg-gray-900 text-white p-3">
+      {/* Top Bar */}
+      <div className="flex items-center justify-between bg-gray-800 border border-gray-700 rounded px-3 py-2">
+        <div className="flex items-center gap-3">
+          {isConnected ? <Wifi className="w-4 h-4 text-green-500" /> : <WifiOff className="w-4 h-4 text-red-500" />}
+          <span className={`text-xs ${isConnected ? 'text-green-400' : 'text-red-400'}`}>{isConnected ? 'CONNECTED' : 'DISCONNECTED'}</span>
+          <span className="text-xs text-gray-400">• Uptime {connectionStats.uptime}s</span>
+          <span className="text-xs text-gray-400">• Updates {connectionStats.totalUpdates}</span>
+          {lastUpdate && <span className="text-xs text-gray-500">• Last {lastUpdate.toLocaleTimeString()}</span>}
         </div>
-        <div className="flex items-center space-x-6 text-sm">
-          <div className={`px-3 py-1 rounded-full ${gameState.isActive ? 'bg-green-600' : 'bg-gray-600'}`}>
-            {gameState.isActive ? 'ACTIVE' : 'WAITING'}
-          </div>
-          <span>Price: {Number(gameState.currentPrice || 0).toFixed(3)}x</span>
-          {gameState.isRugged && (
-            <span className="text-red-400 font-bold">RUGGED!</span>
-          )}
+        <div className="flex items-center gap-4">
+          <CompactValue label="Game" value={`#${gameState.gameId}`} />
+          <CompactValue label="Tick" value={gameState.currentTick} />
+          <CompactValue label="Price" value={`${Number(gameState.currentPrice || 0).toFixed(3)}x`} />
         </div>
       </div>
 
-      <div className="bg-gray-800 rounded-lg p-6 mb-8 border-l-4 border-blue-500">
-        <h2 className="text-xl font-semibold mb-4 flex items-center">
-          <Target className="w-6 h-6 mr-2" />
-          Live Rug Prediction
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <div className="text-center">
-            <div className="text-3xl font-bold text-blue-400">{rugPrediction.predicted_tick}</div>
-            <div className="text-sm text-gray-400">Predicted Tick</div>
+      {/* Grid Debug Panels */}
+      <div className="grid grid-cols-12 gap-2 mt-2">
+        {/* Prediction Summary */}
+        <div className="col-span-3 bg-gray-800 border border-gray-700 rounded p-2">
+          <div className="text-xs font-semibold mb-2 flex items-center"><Target className="w-4 h-4 mr-1" /> Prediction</div>
+          <div className="grid grid-cols-2 gap-2">
+            <CompactValue label="Predicted Tick" value={rugPrediction.predicted_tick} accent="text-blue-400" />
+            <CompactValue label="Tolerance" value={`±${rugPrediction.tolerance}`} accent="text-green-400" />
+            <CompactValue label="Confidence" value={`${((rugPrediction.confidence || 0) * 100).toFixed(1)}%`} accent="text-yellow-400" />
+            <CompactValue label="Remaining" value={Math.max(0, (rugPrediction.predicted_tick || 0) - (gameState.currentTick || 0))} accent="text-purple-400" />
           </div>
-          <div className="text-center">
-            <div className="text-3xl font-bold text-green-400">±{rugPrediction.tolerance}</div>
-            <div className="text-sm text-gray-400">Tolerance</div>
-          </div>
-          <div className="text-center">
-            <div className="text-3xl font-bold text-yellow-400">{((rugPrediction.confidence || 0) * 100).toFixed(1)}%</div>
-            <div className="text-sm text-gray-400">Confidence</div>
-          </div>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-purple-400">{Math.max(0, (rugPrediction.predicted_tick || 0) - (gameState.currentTick || 0))}</div>
-            <div className="text-sm text-gray-400">Ticks Remaining</div>
-          </div>
+          <div className="mt-2 text-[10px] text-gray-400 truncate">Based on: {rugPrediction?.based_on_patterns?.join(', ')}</div>
         </div>
-        {rugPrediction.based_on_patterns && rugPrediction.based_on_patterns.length > 0 && (
-          <div className="mt-4 text-sm text-gray-400">
-            Active patterns: {rugPrediction.based_on_patterns.join(', ')}
-          </div>
-        )}
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-gray-800 rounded-lg p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold flex items-center">{getPatternIcon('pattern1')}<span className="ml-2">Pattern 1</span></h3>
-            <div className={`w-3 h-3 rounded-full ${getStatusColor(patterns?.pattern1?.status)}`}></div>
+        {/* Live Bar */}
+        <div className="col-span-5 bg-gray-800 border border-gray-700 rounded p-2">
+          <div className="text-xs font-semibold mb-2">Live Tracking</div>
+          <div className="relative h-6 bg-gray-700 rounded">
+            <div className="absolute top-0 h-full w-0.5 bg-white" style={{ left: `${Math.min(((gameState.currentTick || 0) / 600) * 100, 100)}%` }} />
+            <div className="absolute top-0 h-full bg-blue-500/60" style={{ left: `${Math.min((((rugPrediction.predicted_tick || 0) - (rugPrediction.tolerance || 0)) / 600) * 100, 100)}%`, width: `${Math.min((((rugPrediction.tolerance || 0) * 2) / 600) * 100, 100)}%` }} />
+            <div className="absolute top-0 h-full w-0.5 bg-yellow-400" style={{ left: `${Math.min(((rugPrediction.predicted_tick || 0) / 600) * 100, 100)}%` }} />
           </div>
-          <div className="space-y-3">
-            <div>
-              <div className="text-sm text-gray-400">Post-Max-Payout Recovery</div>
-              <div className="text-xl font-bold">{patterns?.pattern1?.last_trigger !== null && patterns?.pattern1?.last_trigger !== undefined ? `${patterns.pattern1.last_trigger} games ago` : 'No recent trigger'}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-400">Next Game Max Payout Prob</div>
-              <div className="text-xl font-bold text-yellow-400">{((patterns?.pattern1?.next_game_prob || 0) * 100).toFixed(1)}%</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-400">Status</div>
-              <div className={`text-lg font-bold ${patterns?.pattern1?.status === 'TRIGGERED' ? 'text-red-400' : patterns?.pattern1?.status === 'MONITORING' ? 'text-yellow-400' : 'text-green-400'}`}>{patterns?.pattern1?.status}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-400">Confidence</div>
-              <div className="text-lg font-bold">{((patterns?.pattern1?.confidence || 0) * 100).toFixed(0)}%</div>
-            </div>
+          <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+            <span>0</span><span>Tick {gameState.currentTick}</span><span>{rugPrediction.predicted_tick} ±{rugPrediction.tolerance}</span><span>600+</span>
           </div>
         </div>
 
-        <div className="bg-gray-800 rounded-lg p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold flex items-center">{getPatternIcon('pattern2')}<span className="ml-2">Pattern 2</span></h3>
-            <div className={`w-3 h-3 rounded-full ${getStatusColor(patterns?.pattern2?.status)}`}></div>
-          </div>
-          <div className="space-y-3">
-            <div>
-              <div className="text-sm text-gray-400">Ultra-Short High-Payout</div>
-              <div className="text-xl font-bold">≤10 tick detection</div>
+        {/* ML Insights */}
+        <div className="col-span-4 bg-gray-800 border border-gray-700 rounded p-2">
+          <div className="text-xs font-semibold mb-2">ML Insights</div>
+          {rugPrediction?.ml_enhancement ? (
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <CompactValue label="ML Pred" value={Math.round(rugPrediction.ml_enhancement.ml_prediction)} />
+              <CompactValue label="Base Pred" value={rugPrediction.ml_enhancement.base_prediction} />
+              <CompactValue label="ML Weight" value={(rugPrediction.ml_enhancement.ml_weight * 100).toFixed(0) + '%'} />
+              <CompactValue label="Feat Score" value={Math.round(rugPrediction.ml_enhancement.feature_score)} />
+              <CompactValue label="Adjust" value={Math.round(rugPrediction.ml_enhancement.ml_adjustment)} />
+              <CompactValue label="Accuracy" value={`${((mlStatus?.online_learner?.overall_accuracy || 0) * 100).toFixed(0)}%`} />
             </div>
-            <div>
-              <div className="text-sm text-gray-400">Base Ultra-Short Prob</div>
-              <div className="text-xl font-bold text-orange-400">{((patterns?.pattern2?.ultra_short_prob || 0) * 100).toFixed(1)}%</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-400">Current Game Prob</div>
-              <div className="text-lg font-bold text-blue-400">{((patterns?.pattern2?.current_game_prob || patterns?.pattern2?.current_game_probability || 0) * 100).toFixed(1)}%</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-400">Status</div>
-              <div className={`text-lg font-bold ${patterns?.pattern2?.status === 'TRIGGERED' ? 'text-red-400' : 'text-green-400'}`}>{patterns?.pattern2?.status}</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-gray-800 rounded-lg p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold flex items-center">{getPatternIcon('pattern3')}<span className="ml-2">Pattern 3</span></h3>
-            <div className={`w-3 h-3 rounded-full ${getStatusColor(patterns?.pattern3?.status)}`}></div>
-          </div>
-          <div className="space-y-3">
-            <div>
-              <div className="text-sm text-gray-400">Momentum Thresholds</div>
-              <div className="text-xl font-bold">{Number(patterns?.pattern3?.current_peak || 1).toFixed(1)}x current</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-400">Next Alert: {patterns?.pattern3?.next_alert}x</div>
-              <div className="text-xl font-bold text-red-400">
-                {patterns?.pattern3?.next_alert === 8 ? '24.4%' : patterns?.pattern3?.next_alert === 12 ? '23.0%' : patterns?.pattern3?.next_alert === 20 ? '50.0%' : 'N/A'}
+          ) : (
+            <div className="text-[10px] text-gray-400">Awaiting ML data…</div>
+          )}
+          {rugPrediction?.ml_enhancement?.key_features && (
+            <div className="mt-2 text-[10px] text-gray-400">
+              <div className="font-semibold mb-1">Key Features</div>
+              <div className="grid grid-cols-3 gap-2">
+                {Object.entries(rugPrediction.ml_enhancement.key_features).map(([k, v]) => (
+                  <div key={k} className="flex justify-between"><span>{k}</span><span className="text-gray-300">{typeof v === 'number' ? v.toFixed(2) : v}</span></div>
+                ))}
               </div>
             </div>
-            <div>
-              <div className="text-sm text-gray-400">Status</div>
-              <div className={`text-lg font-bold ${patterns?.pattern3?.status === 'APPROACHING' ? 'text-orange-400' : patterns?.pattern3?.status?.startsWith('DROUGHT_') ? 'text-purple-400' : 'text-green-400'}`}>{patterns?.pattern3?.status}</div>
-            </div>
-            <div className="text-sm space-y-1">
-              <div className="flex justify-between"><span>8x → 50x:</span><span className="text-yellow-400">24.4%</span></div>
-              <div className="flex justify-between"><span>12x → 100x:</span><span className="text-orange-400">23.0%</span></div>
-              <div className="flex justify-between"><span>20x → 50x:</span><span className="text-red-400">50.0%</span></div>
-            </div>
+          )}
+        </div>
+
+        {/* Patterns Table */}
+        <div className="col-span-7 bg-gray-800 border border-gray-700 rounded p-2">
+          <div className="text-xs font-semibold mb-2 flex items-center"><TrendingUp className="w-4 h-4 mr-1" /> Patterns</div>
+          <table className="w-full text-left border-separate border-spacing-y-1">
+            <thead>
+              <tr className="text-[10px] text-gray-400">
+                <th className="px-2">Pattern</th><th className="px-2">Status</th><th className="px-2">Conf</th><th className="px-2">Metric</th><th className="px-2">Next</th>
+              </tr>
+            </thead>
+            <tbody>
+              <PatternRow label="Post-Max" p={patterns?.pattern1} />
+              <PatternRow label="Ultra-Short" p={patterns?.pattern2} />
+              <PatternRow label="Momentum" p={patterns?.pattern3} />
+            </tbody>
+          </table>
+        </div>
+
+        {/* Weights / System */}
+        <div className="col-span-5 bg-gray-800 border border-gray-700 rounded p-2">
+          <div className="text-xs font-semibold mb-2">Weights & System</div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            {mlStatus?.online_learner?.pattern_weights && Object.entries(mlStatus.online_learner.pattern_weights).map(([k, v]) => (
+              <div key={k} className="flex justify-between"><span>{k}</span><span className="text-gray-300">{(v).toFixed(2)}</span></div>
+            ))}
           </div>
+          <div className="mt-2 text-[10px] text-gray-400">Errors: {mlStatus?.system_health?.errors || 0} • Last: {mlStatus?.system_health?.last_error || '—'}</div>
+        </div>
+
+        {/* Raw Payload */}
+        <div className="col-span-12 bg-gray-800 border border-gray-700 rounded p-2 max-h-48 overflow-auto">
+          <div className="text-xs font-semibold mb-2 flex items-center"><Clock className="w-4 h-4 mr-1" /> Live Payload</div>
+          <pre className="text-[10px] whitespace-pre-wrap text-gray-300">{lastPayload ? JSON.stringify(lastPayload, null, 2) : 'Waiting for data…'}</pre>
         </div>
       </div>
 
-      <div className="mt-8 bg-gray-800 rounded-lg p-6">
-        <h3 className="text-lg font-semibold mb-4">Live Prediction Tracking</h3>
-        <div className="relative">
-          <div className="h-8 bg-gray-700 rounded-full overflow-hidden relative">
-            <div className="absolute top-0 h-full w-1 bg-white z-30 shadow-lg" style={{ left: `${Math.min(((gameState.currentTick || 0) / 600) * 100, 100)}%` }}>
-              <div className="absolute -top-6 -left-8 text-xs text-white font-bold">NOW</div>
-            </div>
-            <div className="absolute top-0 h-full bg-blue-500 opacity-60 z-10" style={{ left: `${Math.min((((rugPrediction.predicted_tick || 0) - (rugPrediction.tolerance || 0)) / 600) * 100, 100)}%`, width: `${Math.min((((rugPrediction.tolerance || 0) * 2) / 600) * 100, 100)}%` }}></div>
-            <div className="absolute top-0 h-full w-1 bg-yellow-400 z-20 shadow-lg" style={{ left: `${Math.min(((rugPrediction.predicted_tick || 0) / 600) * 100, 100)}%` }}>
-              <div className="absolute -top-6 -left-12 text-xs text-yellow-400 font-bold">PREDICT</div>
-            </div>
-          </div>
-          <div className="flex justify-between text-xs text-gray-400 mt-3">
-            <span>0 ticks</span>
-            <span>Current: {gameState.currentTick}</span>
-            <span>Predicted: {rugPrediction.predicted_tick} ±{rugPrediction.tolerance}</span>
-            <span>600+ ticks</span>
-          </div>
-        </div>
-      </div>
-
-      {!isConnected && (
-        <div className="mt-8 bg-red-900 bg-opacity-50 border border-red-600 rounded-lg p-4">
-          <h4 className="text-red-400 font-semibold mb-2">Connection Issues</h4>
-          <p className="text-sm text-red-300">Unable to connect to backend. Make sure the backend is running and REACT_APP_BACKEND_URL is correctly set.</p>
-        </div>
+      {connectionStats.lastError && (
+        <div className="mt-2 text-[10px] text-red-400">Error: {connectionStats.lastError}</div>
       )}
     </div>
   );

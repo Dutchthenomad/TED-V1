@@ -87,7 +87,7 @@ async def get_status_checks():
 
 app.include_router(api_router)
 
-# Import enhanced pattern engine
+# Import enhanced engines
 from enhanced_pattern_engine import IntegratedPatternTracker
 
 # Global state
@@ -220,24 +220,22 @@ async def websocket_endpoint(websocket: WebSocket):
             initial_state = {
                 'game_state': pattern_tracker.current_game,
                 'patterns': pattern_tracker.enhanced_engine.get_pattern_dashboard_data(),
-                'prediction': pattern_tracker.enhanced_engine.predict_rug_timing(
+                'prediction': pattern_tracker.ml_engine.predict_rug_timing(
                     pattern_tracker.current_game.get('currentTick', 0),
                     pattern_tracker.current_game.get('currentPrice', 1.0),
                     pattern_tracker.current_game.get('peak_price', 1.0)
                 ),
+                'ml_status': pattern_tracker.ml_engine.get_ml_status(),
                 'system_status': {
                     'rugs_connected': rugs_client.connected,
                     'uptime_seconds': int((datetime.now() - system_stats['start_time']).total_seconds()),
                     'total_games': len(pattern_tracker.enhanced_engine.game_history)
                 }
             }
-            # Ensure datetime serializes
             def _default(o):
                 if isinstance(o, datetime):
                     return o.isoformat()
                 return str(o)
-            
-
             await websocket.send_text(json.dumps(initial_state, default=_default))
         while True:
             try:
@@ -294,6 +292,7 @@ async def get_system_status():
                 "pattern3": pattern_tracker.enhanced_engine.pattern_stats['pattern3'].accuracy,
             },
         },
+        "ml": pattern_tracker.ml_engine.get_ml_status(),
         "last_error": system_stats['last_error'],
         "current_game": pattern_tracker.current_game,
     }
@@ -304,7 +303,7 @@ async def get_current_patterns():
         patterns = pattern_tracker.enhanced_engine.get_pattern_dashboard_data()
         prediction = None
         if pattern_tracker.current_game:
-            prediction = pattern_tracker.enhanced_engine.predict_rug_timing(
+            prediction = pattern_tracker.ml_engine.predict_rug_timing(
                 pattern_tracker.current_game.get('currentTick', 0),
                 pattern_tracker.current_game.get('currentPrice', 1.0),
                 pattern_tracker.current_game.get('peak_price', 1.0)
@@ -312,6 +311,7 @@ async def get_current_patterns():
         return {
             "patterns": patterns,
             "prediction": prediction,
+            "ml_status": pattern_tracker.ml_engine.get_ml_status(),
             "current_game": pattern_tracker.current_game,
             "timestamp": datetime.now().isoformat(),
         }
