@@ -78,6 +78,24 @@ const TreasuryPatternDashboard = () => {
           if (data.patterns) setPatterns(data.patterns);
           if (data.prediction) setRugPrediction(data.prediction);
           if (data.ml_status) setMlStatus(data.ml_status);
+          // Sticky side bet logic: capture first non-null per game
+          if (data.game_state?.gameId !== undefined) {
+            const gid = data.game_state.gameId;
+            if (stickyGameId !== gid) {
+              setStickyGameId(gid);
+              setStickySideBet(null);
+            }
+          }
+          if (data.side_bet_recommendation) {
+            if (!stickySideBet && data.game_state) {
+              setStickySideBet({
+                data: data.side_bet_recommendation,
+                tick: data.game_state.currentTick,
+                timestamp: new Date().toISOString(),
+              });
+            }
+          }
+
           if (data.prediction_history) setPredictionHistory(data.prediction_history);
           if (data.side_bet_recommendation !== undefined) setSideBet(data.side_bet_recommendation);
           if (data.side_bet_performance) setSideBetPerf(data.side_bet_performance);
