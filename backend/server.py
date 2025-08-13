@@ -404,7 +404,7 @@ class RugsWebSocketClient:
 
     async def connect_to_rugs(self):
         """Connect to Rugs.fun backend"""
-        rugs_url = os.getenv('RUGS_BACKEND_URL', 'https://backend.rugs.fun?frontend-version=1.0')
+        rugs_url = os.getenv('RUGS_BACKEND_URL') or 'https://backend.rugs.fun?frontend-version=1.0'
         try:
             await self.sio.connect(
                 rugs_url, 
