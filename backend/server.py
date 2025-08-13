@@ -120,6 +120,9 @@ TICK_DURATION_MS = 250  # NOT 271.5
 MEDIAN_DURATION = 205
 ULTRA_SHORT_THRESHOLD = 10
 MAX_PAYOUT_THRESHOLD = 0.019
+SIDEBET_WINDOW_TICKS = int(os.getenv("SIDEBET_WINDOW_TICKS", "40"))
+SIDEBET_COOLDOWN_TICKS = int(os.getenv("SIDEBET_COOLDOWN_TICKS", "4"))
+SIDEBET_PWIN_THRESHOLD = float(os.getenv("SIDEBET_PWIN_THRESHOLD", "0.20"))
 
 # Enhanced tracker with side bet integration
 class IntegratedPatternTracker:
@@ -130,7 +133,7 @@ class IntegratedPatternTracker:
         self.ml_engine = GameAwareMLPatternEngine(self.enhanced_engine)
         self.current_game = None
         self.prediction_history = deque(maxlen=200)
-        self.side_bet_history = deque(maxlen=100)
+        self.side_bet_history = deque(maxlen=200)
         self.side_bet_performance = {
             'total_recommendations': 0,
             'positive_ev_bets': 0,
@@ -138,6 +141,9 @@ class IntegratedPatternTracker:
             'bets_lost': 0,
             'total_ev': 0.0
         }
+        # gating state
+        self.last_side_bet_tick = None
+        self.last_side_bet_active_until = None
 
     def process_game_update(self, data):
         """Process incoming game update from Rugs.fun"""
@@ -188,12 +194,28 @@ class IntegratedPatternTracker:
             current_tick, current_price, self.current_game['peak_price']
         )
         
-        # Get side bet recommendation (only early in game)
+        # Capture EPR state at prediction time
+        try:
+            epr_state = getattr(self.ml_engine, "_epr", {})
+            prediction["epr_active_at_prediction"] = bool(epr_state.get("active", False))
+        except Exception:
+            prediction["epr_active_at_prediction"] = False
+            
+        prediction = self._quantize_prediction_tolerance(prediction, current_tick)
+        
+        # Hazard-based side bet recommendation with 40+4 gating
         side_bet = None
-        if current_tick <= 5 and not self.current_game.get('side_bet_evaluated', False):
-            side_bet = self.enhanced_engine.get_side_bet_recommendation()
-            self._record_side_bet_recommendation(side_bet, game_id, current_tick)
-            self.current_game['side_bet_evaluated'] = True
+        can_recommend = True
+        if self.last_side_bet_active_until is not None:
+            can_recommend = current_tick > (self.last_side_bet_active_until + SIDEBET_COOLDOWN_TICKS)
+        if can_recommend:
+            side_bet = self.ml_engine.side_bet_signal(
+                current_tick, current_price, self.current_game['peak_price']
+            )
+            if side_bet and side_bet.get('action') == 'PLACE_SIDE_BET':
+                self._record_side_bet_recommendation(side_bet, game_id, current_tick)
+                self.last_side_bet_tick = current_tick
+                self.last_side_bet_active_until = current_tick + (SIDEBET_WINDOW_TICKS - 1)
         
         # Get pattern dashboard
         patterns = self.enhanced_engine.get_pattern_dashboard_data()
@@ -212,7 +234,7 @@ class IntegratedPatternTracker:
             'prediction': prediction,
             'side_bet_recommendation': side_bet,
             'ml_status': self.ml_engine.get_ml_status(),
-            'prediction_history': list(self.prediction_history)[-20:],
+            'prediction_history': list(self.prediction_history),  # Send full history
             'side_bet_performance': self.side_bet_performance,
             'timestamp': datetime.now().isoformat(),
             'enhanced': True,
@@ -262,6 +284,14 @@ class IntegratedPatternTracker:
                 actual_tick = int(completed_game.final_tick)
                 diff = abs(predicted_tick - actual_tick)
                 
+                # Get EPR state if available
+                epr_active = False
+                try:
+                    epr_state = getattr(self.ml_engine, "_epr", {})
+                    epr_active = bool(epr_state.get("active", False))
+                except Exception:
+                    pass
+                    
                 record = {
                     'game_id': completed_game.game_id,
                     'predicted_tick': predicted_tick,
@@ -272,12 +302,38 @@ class IntegratedPatternTracker:
                     'end_price': completed_game.end_price,
                     'is_ultra_short': completed_game.is_ultra_short,
                     'is_max_payout': completed_game.is_max_payout,
+                    'epr_active_at_prediction': epr_active,
                     'timestamp': datetime.now().isoformat()
                 }
                 self.prediction_history.append(record)
             except Exception as e:
                 logger.error(f"Failed to record prediction: {e}")
     
+    def _quantize_prediction_tolerance(self, prediction: dict, current_tick: int) -> dict:
+        """
+        Make ±tolerance future-safe and aligned to 40-tick windows:
+        - lower bound never before current_tick
+        - total width (2*tol) is a multiple of 40 => tol multiple of 20
+        """
+        try:
+            center = int(prediction.get("predicted_tick", prediction.get("prediction", 0)))
+            tol = int(max(0, prediction.get("tolerance", 0)))
+            # disallow "past coverage": ensure we don't extend below current tick
+            back_limit = max(0, center - current_tick)
+            # quantize tol down: tol is multiple of 20 and ≤ back_limit
+            new_tol = (min(tol, back_limit) // 20) * 20
+            lower = max(current_tick, center - new_tol)
+            upper = center + new_tol
+            width = max(0, upper - lower)
+            windows = max(1, (width + (SIDEBET_WINDOW_TICKS - 1)) // SIDEBET_WINDOW_TICKS)
+            prediction["tolerance"] = new_tol
+            prediction["coverage_lower"] = lower
+            prediction["coverage_upper"] = upper
+            prediction["coverage_windows"] = windows
+        except Exception as e:
+            logger.error(f"Tolerance quantization error: {e}")
+        return prediction
+
     def _record_side_bet_recommendation(self, side_bet, game_id, tick):
         """Record side bet recommendation"""
         if side_bet:
@@ -285,7 +341,9 @@ class IntegratedPatternTracker:
                 'game_id': game_id,
                 'tick': tick,
                 'action': side_bet['action'],
-                'probability': side_bet['ultra_short_probability'],
+                'probability': side_bet.get('p_win_40', side_bet.get('ultra_short_probability', 0)),
+                'p_win_40': side_bet.get('p_win_40'),
+                'coverage_end_tick': tick + (SIDEBET_WINDOW_TICKS - 1),
                 'expected_value': side_bet['expected_value'],
                 'confidence': side_bet['confidence'],
                 'timestamp': datetime.now().isoformat()
@@ -302,8 +360,9 @@ class IntegratedPatternTracker:
         # Check if we made a side bet recommendation for this game
         for bet in list(self.side_bet_history)[-10:]:
             if bet['game_id'] == completed_game.game_id:
-                # Side bet wins if game ended within 40 ticks
-                if completed_game.final_tick <= 40:
+                placed_at = bet.get('tick', 0)
+                # Side bet wins if game ended within placement + window ticks
+                if completed_game.final_tick <= placed_at + SIDEBET_WINDOW_TICKS:
                     self.side_bet_performance['bets_won'] += 1
                     logger.info(f"✅ Side bet WON for game {completed_game.game_id} (ended at {completed_game.final_tick})")
                 else:
@@ -512,7 +571,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 'side_bet_recommendation': pattern_tracker.enhanced_engine.get_side_bet_recommendation()
                     if pattern_tracker.current_game.get('currentTick', 0) <= 5 else None,
                 'ml_status': pattern_tracker.ml_engine.get_ml_status(),
-                'prediction_history': list(pattern_tracker.prediction_history)[-20:],
+                'prediction_history': list(pattern_tracker.prediction_history),  # Send full history
                 'side_bet_performance': pattern_tracker.side_bet_performance,
                 'system_status': {
                     'rugs_connected': bool(rugs_client and rugs_client.connected),
@@ -551,7 +610,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     else:
                         await websocket.send_text(json.dumps(status))
                 elif msg == 'side_bet':
-                    side_bet = pattern_tracker.enhanced_engine.get_side_bet_recommendation()
+                    cg = pattern_tracker.current_game or {}
+                    side_bet = pattern_tracker.ml_engine.side_bet_signal(
+                        cg.get('currentTick', 0),
+                        cg.get('currentPrice', 1.0),
+                        cg.get('peak_price', 1.0),
+                    )
                     payload = {"type": "side_bet_recommendation", "data": side_bet, "timestamp": datetime.now().isoformat()}
                     if connection_manager:
                         await connection_manager.send_personal(websocket, payload)
@@ -647,7 +711,7 @@ async def get_current_patterns():
             "prediction": prediction,
             "side_bet_recommendation": side_bet,
             "ml_status": pattern_tracker.ml_engine.get_ml_status(),
-            "prediction_history": list(pattern_tracker.prediction_history)[-20:],
+            "prediction_history": list(pattern_tracker.prediction_history),  # Send full history
             "side_bet_performance": pattern_tracker.side_bet_performance,
             "current_game": pattern_tracker.current_game,
             "timestamp": datetime.now().isoformat(),
@@ -660,12 +724,17 @@ async def get_current_patterns():
 async def get_side_bet_recommendation():
     """Get current side bet recommendation"""
     try:
-        side_bet = pattern_tracker.enhanced_engine.get_side_bet_recommendation()
+        cg = pattern_tracker.current_game or {}
+        side_bet = pattern_tracker.ml_engine.side_bet_signal(
+            cg.get('currentTick', 0),
+            cg.get('currentPrice', 1.0),
+            cg.get('peak_price', 1.0),
+        )
         
         return {
             "recommendation": side_bet,
             "performance": pattern_tracker.side_bet_performance,
-            "history": list(pattern_tracker.side_bet_history)[-20:],
+            "history": list(pattern_tracker.side_bet_history)[-40:],
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -704,7 +773,7 @@ async def get_game_history(limit: int = 100):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/prediction-history")
-async def get_prediction_history(limit: int = 50):
+async def get_prediction_history(limit: int = 200):
     """Get prediction history with accuracy metrics"""
     try:
         records = list(pattern_tracker.prediction_history)[-limit:]
@@ -719,7 +788,7 @@ async def get_prediction_history(limit: int = 50):
             avg_error = 0.0
         
         return {
-            "records": records,
+            "history": records,  # Changed from "records" to match frontend expectation
             "metrics": {
                 "accuracy": accuracy,
                 "average_error": avg_error,

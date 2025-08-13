@@ -32,12 +32,15 @@ export function useSystemMonitoring({ wsSystemStatus, connectionStats }) {
     fetchStatus();
     fetchMetrics();
 
+    const onFocus = () => { fetchStatus(); fetchMetrics(); };
+    window.addEventListener('focus', onFocus);
     statusTimer = setInterval(fetchStatus, 30000);
     metricsTimer = setInterval(fetchMetrics, 60000);
 
     return () => {
       if (statusTimer) clearInterval(statusTimer);
       if (metricsTimer) clearInterval(metricsTimer);
+      window.removeEventListener('focus', onFocus);
     };
   }, []);
 
