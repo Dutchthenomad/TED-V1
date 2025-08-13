@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { TrendingUp, Clock, Target, Wifi, WifiOff } from 'lucide-react';
 import SideBetPanel from './SideBetPanel';
+import { useSystemMonitoring } from './hooks/useSystemMonitoring';
 
 const CompactValue = ({ label, value, accent }) => (
   <div className="flex flex-col leading-tight min-w-0">
@@ -19,16 +20,26 @@ const ModuleBadge = ({ label, active }) => (
     {label}
   </span>
 );
+const StatLine = ({ label, value, accent }) => (
+  <div className="flex items-center justify-between text-[11px]">
+    <span className="text-gray-400 mr-2 truncate">{label}</span>
+    <span className={`font-semibold ${accent || ''}`}>{value}</span>
+  </div>
+);
+
 
 const TreasuryPatternDashboard = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
+  const isConnectingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const pingIntervalRef = useRef(null);
 
-  const [gameState, setGameState] = useState({ gameId: 0, currentTick: 0, currentPrice: 1.0, isActive: false, isRugged: false, peak_price: 1.0 });
+  const [gameState, setGameState] = useState({ gameId: null, currentTick: 0, currentPrice: 0, rugged: false, peak_price: 1.0 });
   const [patterns, setPatterns] = useState({});
-  const [rugPrediction, setRugPrediction] = useState({ predicted_tick: 200, confidence: 0.5, tolerance: 50, based_on_patterns: [] });
+  const [rugPrediction, setRugPrediction] = useState({ predicted_tick: 200, confidence: 0.5, tolerance: 50, based_on_patterns: [], ml_enhancement: {} });
   const [mlStatus, setMlStatus] = useState(null);
   const [predictionHistory, setPredictionHistory] = useState([]);
   const [connectionStats, setConnectionStats] = useState({ totalUpdates: 0, lastError: null, uptime: 0 });
@@ -36,45 +47,202 @@ const TreasuryPatternDashboard = () => {
   const [sideBet, setSideBet] = useState(null);
   const [sideBetPerf, setSideBetPerf] = useState(null);
   const [version, setVersion] = useState(null);
+  const [avgEndWindow, setAvgEndWindow] = useState(20); // Average End Price window (default 20)
+  // Sticky side bet per game
+  const [stickySideBet, setStickySideBet] = useState(null);
+  const [stickyGameId, setStickyGameId] = useState(null);
 
-  const getBackendBase = () => {
-    const base = process.env.REACT_APP_BACKEND_URL || '';
+  const [avgDiffWindow, setAvgDiffWindow] = useState(20); // Average Diff window (default 20)
+
+  // Monitoring and REST-enhanced state
+  const [wsSystemStatus, setWsSystemStatus] = useState(null);
+  const monitoring = useSystemMonitoring({ wsSystemStatus, connectionStats });
+  const restStatus = monitoring.rest;
+  const restMetrics = monitoring.metrics;
+
+  const getBackendBaseHttp = () => {
+    return process.env.REACT_APP_BACKEND_URL || '';
+  };
+  const getBackendBaseWs = () => {
+    // Use REACT_APP_WS_URL if available, otherwise derive from BACKEND_URL
+    if (process.env.REACT_APP_WS_URL) {
+      return process.env.REACT_APP_WS_URL.replace(/\/+$/, '');
+    }
+    const base = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
     return base.replace(/^http/i, 'ws');
   };
 
+
   const connectWebSocket = () => {
+    // Don't create a new connection if one already exists and is connecting/open
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.CONNECTING || wsRef.current.readyState === WebSocket.OPEN)) {
+      return;
+    }
+    
+    // Prevent concurrent connection attempts
+    if (isConnectingRef.current) {
+      return;
+    }
+    
+    // Don't connect if component is unmounted
+    if (!mountedRef.current) {
+      return;
+    }
+    
+    isConnectingRef.current = true;
+    
     try {
-      const wsUrl = `${getBackendBase()}/api/ws`;
+      const wsUrl = `${getBackendBaseWs()}/api/ws`;
+      console.log('Connecting to WebSocket:', wsUrl);
       wsRef.current = new WebSocket(wsUrl);
-      wsRef.current.onopen = () => { setIsConnected(true); setConnectionStats(prev => ({ ...prev, lastError: null })); };
+      
+      wsRef.current.onopen = () => {
+        console.log('WebSocket connected');
+        isConnectingRef.current = false;
+        if (mountedRef.current) {
+          setIsConnected(true);
+          setConnectionStats(prev => ({ ...prev, lastError: null }));
+          
+          // Start ping interval to keep connection alive
+          if (pingIntervalRef.current) {
+            clearInterval(pingIntervalRef.current);
+          }
+          pingIntervalRef.current = setInterval(() => {
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send('ping');
+              console.log('Sent ping');
+            }
+          }, 25000); // Send ping every 25 seconds
+        }
+      };
+      
       wsRef.current.onmessage = (event) => {
+        if (!mountedRef.current) return;
+        
         try {
           const data = JSON.parse(event.data);
-          if (data.game_state) setGameState(prev => ({ ...prev, ...data.game_state }));
-          if (data.patterns) setPatterns(data.patterns);
-          if (data.prediction) setRugPrediction(data.prediction);
-          if (data.ml_status) setMlStatus(data.ml_status);
+          console.log('WebSocket message received:', data.type || 'data', 'tick:', data.game_state?.currentTick);
+          
+          // Force state updates with new object references to ensure re-render
+          if (data.game_state) {
+            setGameState(prevState => {
+              const newState = { ...data.game_state };
+              console.log('Game state update - Tick:', newState.currentTick, 'Price:', newState.currentPrice);
+              return newState;
+            });
+          }
+          if (data.patterns) setPatterns(() => ({ ...data.patterns }));
+          if (data.prediction) setRugPrediction(() => ({ ...data.prediction }));
+          if (data.ml_status) setMlStatus(() => ({ ...data.ml_status }));
+          // Sticky side bet logic: capture first non-null per game
+          if (data.game_state?.gameId !== undefined) {
+            const gid = data.game_state.gameId;
+            if (stickyGameId !== gid) {
+              setStickyGameId(gid);
+              setStickySideBet(null);
+            }
+          }
+          if (data.side_bet_recommendation) {
+            if (!stickySideBet && data.game_state) {
+              setStickySideBet({
+                data: data.side_bet_recommendation,
+                tick: data.game_state.currentTick,
+                timestamp: new Date().toISOString(),
+              });
+            }
+          }
+
           if (data.prediction_history) setPredictionHistory(data.prediction_history);
           if (data.side_bet_recommendation !== undefined) setSideBet(data.side_bet_recommendation);
           if (data.side_bet_performance) setSideBetPerf(data.side_bet_performance);
           if (data.version) setVersion(data.version);
-          setLastPayload(data);
-          setLastUpdate(new Date());
-          setConnectionStats(prev => ({ ...prev, totalUpdates: prev.totalUpdates + 1 }));
+          if (data.system_status) setWsSystemStatus(data.system_status);
+          // Force new Date object and state updates
+          setLastPayload(() => data);
+          setLastUpdate(() => new Date());
+          setConnectionStats(prev => {
+            const newStats = { ...prev, totalUpdates: prev.totalUpdates + 1 };
+            console.log('Total WebSocket updates received:', newStats.totalUpdates);
+            return newStats;
+          });
         } catch (err) {
           setConnectionStats(prev => ({ ...prev, lastError: `Parse error: ${err.message}` }));
         }
       };
-      wsRef.current.onerror = () => { setConnectionStats(prev => ({ ...prev, lastError: 'Connection error' })); };
-      wsRef.current.onclose = () => { setIsConnected(false); reconnectTimeoutRef.current = setTimeout(() => { connectWebSocket(); }, 1500); };
+      wsRef.current.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        isConnectingRef.current = false;
+        if (mountedRef.current) {
+          setConnectionStats(prev => ({ ...prev, lastError: 'Connection error' }));
+        }
+      };
+      
+      wsRef.current.onclose = (event) => {
+        console.log('WebSocket closed:', event.code, event.reason);
+        isConnectingRef.current = false;
+        
+        // Clear ping interval
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current);
+          pingIntervalRef.current = null;
+        }
+        
+        if (mountedRef.current) {
+          setIsConnected(false);
+          
+          // Only attempt reconnect if not a normal closure and component is still mounted
+          if (event.code !== 1000 && event.code !== 1001) {
+            if (reconnectTimeoutRef.current) {
+              clearTimeout(reconnectTimeoutRef.current);
+            }
+            reconnectTimeoutRef.current = setTimeout(() => {
+              if (mountedRef.current) {
+                connectWebSocket();
+              }
+            }, 2000);
+          }
+        }
+      };
     } catch (err) {
-      setConnectionStats(prev => ({ ...prev, lastError: `Connection failed: ${err.message}` }));
+      console.error('Failed to create WebSocket:', err);
+      isConnectingRef.current = false;
+      if (mountedRef.current) {
+        setConnectionStats(prev => ({ ...prev, lastError: `Connection failed: ${err.message}` }));
+      }
     }
   };
 
   useEffect(() => {
-    connectWebSocket();
-    return () => { if (wsRef.current) wsRef.current.close(); if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current); };
+    mountedRef.current = true;
+    
+    // Delay initial connection to avoid React StrictMode double-mount issues
+    const connectionTimer = setTimeout(() => {
+      if (mountedRef.current) {
+        connectWebSocket();
+      }
+    }, 100);
+    
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(connectionTimer);
+      
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
+      
+      if (wsRef.current) {
+        if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
+          wsRef.current.close(1000, 'Component unmounting');
+        }
+        wsRef.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -129,6 +297,16 @@ const TreasuryPatternDashboard = () => {
           <CompactValue label="Tick" value={gameState.currentTick} />
           <CompactValue label="Price" value={`${Number(gameState.currentPrice || 0).toFixed(3)}x`} />
           <CompactValue label="Version" value={version || '—'} />
+          {/* Top Bar ML method and module badges */}
+          <div className="hidden sm:flex items-center gap-2 min-w-0">
+            <span className="text-[10px] text-gray-400 whitespace-nowrap">Method:</span>
+            <span className="text-[10px] text-blue-300 truncate max-w-[120px]">{predictionMethod}</span>
+            <div className="flex items-center gap-1 flex-wrap">
+              <ModuleBadge label="hazard" active={!!modules?.hazard} />
+              <ModuleBadge label="gate" active={!!modules?.gate} />
+              <ModuleBadge label="conformal" active={!!modules?.conformal} />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -153,15 +331,74 @@ const TreasuryPatternDashboard = () => {
           </div>
         </div>
 
-        <div className="col-span-5 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
-          <div className="text-xs font-semibold mb-2">Live Tracking <span className="text-[10px] text-gray-400 ml-1">(Conformal band)</span></div>
-          <div className="relative h-5 bg-gray-700 rounded overflow-hidden">
-            <div className="absolute top-0 h-full w-0.5 bg-white" style={{ left: `${Math.min(((gameState.currentTick || 0) / 600) * 100, 100)}%` }} />
-            <div className="absolute top-0 h-full bg-blue-500/60" style={{ left: `${Math.min((((rugPrediction.predicted_tick || 0) - (rugPrediction.tolerance || 0)) / 600) * 100, 100)}%`, width: `${Math.min((((rugPrediction.tolerance || 0) * 2) / 600) * 100, 100)}%` }} />
-            <div className="absolute top-0 h-full w-0.5 bg-yellow-400" style={{ left: `${Math.min(((rugPrediction.predicted_tick || 0) / 600) * 100, 100)}%` }} />
+        <div className="col-span-5 min-h-0 overflow-hidden flex flex-col gap-2">
+          {/* Live Tracking card */}
+          <div className="bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
+            <div className="text-xs font-semibold mb-2">Live Tracking <span className="text-[10px] text-gray-400 ml-1">(Conformal band)</span></div>
+            <div className="relative h-5 bg-gray-700 rounded overflow-hidden">
+              <div className="absolute top-0 h-full w-0.5 bg-white" style={{ left: `${Math.min(((gameState.currentTick || 0) / 600) * 100, 100)}%` }} />
+              <div className="absolute top-0 h-full bg-blue-500/60" style={{ left: `${Math.min((((rugPrediction.predicted_tick || 0) - (rugPrediction.tolerance || 0)) / 600) * 100, 100)}%`, width: `${Math.min((((rugPrediction.tolerance || 0) * 2) / 600) * 100, 100)}%` }} />
+              <div className="absolute top-0 h-full w-0.5 bg-yellow-400" style={{ left: `${Math.min(((rugPrediction.predicted_tick || 0) / 600) * 100, 100)}%` }} />
+            </div>
+            <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+              <span>0</span><span>Tick {gameState.currentTick}</span><span>{rugPrediction.predicted_tick} ±{rugPrediction.tolerance}</span><span>600+</span>
+            </div>
           </div>
-          <div className="flex justify-between text-[10px] text-gray-400 mt-1">
-            <span>0</span><span>Tick {gameState.currentTick}</span><span>{rugPrediction.predicted_tick} ±{rugPrediction.tolerance}</span><span>600+</span>
+
+          {/* Average End Price card */}
+          <div className="bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-xs font-semibold">Average End Price</div>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-gray-400">Window</span>
+                <select
+                  className="bg-gray-900 border border-gray-700 text-[10px] rounded px-1 py-0.5 focus:outline-none"
+                  value={avgEndWindow}
+                  onChange={(e) => setAvgEndWindow(Number(e.target.value))}
+                >
+                  {[5,10,20,25,50,100].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="text-sm font-semibold text-blue-300">
+              {(() => {
+                const recs = (predictionHistory || []).slice(-avgEndWindow);
+                const usable = recs.filter(r => typeof r.end_price === 'number' && !isNaN(r.end_price));
+                const count = usable.length;
+                if (count === 0) return '—';
+                const sum = usable.reduce((acc, r) => acc + Number(r.end_price), 0);
+                return (sum / count).toFixed(6);
+              })()}
+            </div>
+            <div className="text-[10px] text-gray-500 mt-1">Based on available records (up to selected window)</div>
+          </div>
+
+          {/* Average Diff card */}
+          <div className="bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
+            <div className="flex items-center justify-between mb-1">
+              <div className="text-xs font-semibold">Average Diff (Pred vs Actual)</div>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-gray-400">Window</span>
+                <select
+                  className="bg-gray-900 border border-gray-700 text-[10px] rounded px-1 py-0.5 focus:outline-none"
+                  value={avgDiffWindow}
+                  onChange={(e) => setAvgDiffWindow(Number(e.target.value))}
+                >
+                  {[5,10,20,25,50,100].map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="text-sm font-semibold text-yellow-300">
+              {(() => {
+                const recs = (predictionHistory || []).slice(-avgDiffWindow);
+                const usable = recs.filter(r => typeof r.diff === 'number' && !isNaN(r.diff));
+                const count = usable.length;
+                if (count === 0) return '—';
+                const sum = usable.reduce((acc, r) => acc + Number(r.diff), 0);
+                return Math.round(sum / count);
+              })()}
+            </div>
+            <div className="text-[10px] text-gray-500 mt-1">Average absolute difference in ticks</div>
           </div>
         </div>
 
@@ -252,9 +489,23 @@ const TreasuryPatternDashboard = () => {
 
         {/* Row 3 */}
         <div className="col-span-4 min-h-0 overflow-hidden">
-          <SideBetPanel sideBet={sideBet} performance={sideBetPerf} />
+          {/* SideBetPanel: sticky per game with captured tick label */}
+          <SideBetPanel sideBet={stickySideBet?.data} performance={sideBetPerf} capturedTick={stickySideBet?.tick} capturedAt={stickySideBet?.timestamp} />
         </div>
         <div className="col-span-8 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
+        {/* Side Bet Monitor */}
+        <div className="col-span-4 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
+          <div className="text-xs font-semibold mb-2">Side Bet Monitor</div>
+          <div className="grid grid-cols-2 gap-2 pr-1 text-[11px]">
+            <div className="flex items-center justify-between"><span className="text-gray-400">Eligible (tick ≤ 5)</span><span className="font-semibold">{(gameState?.currentTick || 0) <= 5 ? 'Yes' : 'No'}</span></div>
+            <div className="flex items-center justify-between"><span className="text-gray-400">Last Rec (this game)</span><span className="font-semibold">{stickySideBet ? (stickySideBet.tick + 't') : '—'}</span></div>
+            <div className="flex items-center justify-between"><span className="text-gray-400">Total Recs</span><span className="font-semibold">{sideBetPerf?.total_recommendations || 0}</span></div>
+            <div className="flex items-center justify-between"><span className="text-gray-400">Win/Loss</span><span className="font-semibold">{(sideBetPerf?.bets_won || 0)}/{(sideBetPerf?.bets_lost || 0)}</span></div>
+            <div className="flex items-center justify-between"><span className="text-gray-400">Positive EV</span><span className="font-semibold">{sideBetPerf?.positive_ev_bets || 0}</span></div>
+            <div className="flex items-center justify-between"><span className="text-gray-400">Total EV</span><span className="font-semibold">{typeof sideBetPerf?.total_ev === 'number' ? Number(sideBetPerf.total_ev).toFixed(3) : '0.000'}</span></div>
+          </div>
+        </div>
+
           <div className="text-xs font-semibold mb-2 flex items-center"><Clock className="w-4 h-4 mr-1" /> Live Payload</div>
           <div className="max-h-32 overflow-auto">
             <pre className="text-[10px] whitespace-pre-wrap break-words break-all text-gray-300">{lastPayload ? JSON.stringify(lastPayload, null, 2) : 'Waiting for data…'}</pre>

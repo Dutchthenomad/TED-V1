@@ -1,6 +1,6 @@
 import React from 'react';
 
-const SideBetPanel = ({ sideBet, performance }) => {
+const SideBetPanel = ({ sideBet, performance, capturedTick, capturedAt }) => {
   if (!sideBet) return null;
 
   const isPositiveEV = sideBet.expected_value > 0;
@@ -8,7 +8,12 @@ const SideBetPanel = ({ sideBet, performance }) => {
 
   return (
     <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 h-full">
-      <h3 className="text-sm font-semibold text-gray-300 mb-2">Side Bet Arbitrage</h3>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-semibold text-gray-300">Side Bet Arbitrage</h3>
+        {typeof capturedTick === 'number' && (
+          <span className="text-[10px] text-gray-400">Captured at tick {capturedTick}</span>
+        )}
+      </div>
 
       {/* Main Recommendation */}
       <div className={`text-lg font-bold mb-2 ${shouldBet ? 'text-green-400' : 'text-yellow-400'}`}>

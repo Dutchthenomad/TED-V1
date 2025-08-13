@@ -313,7 +313,14 @@ class IntegratedPatternTracker:
 
 # Initialize tracker
 pattern_tracker = IntegratedPatternTracker()
-connected_clients: List[WebSocket] = []
+# Use enhanced connection manager
+try:
+    from core.connection_manager import ConnectionManager
+    connection_manager = ConnectionManager(max_connections=int(os.getenv('MAX_WEBSOCKET_CONNECTIONS', '100')), message_queue_size=int(os.getenv('WS_MESSAGE_QUEUE_SIZE', '1000')))
+except Exception:
+    connection_manager = None
+
+connected_clients: List[WebSocket] = []  # Legacy list retained for compatibility
 system_stats = {
     'start_time': datetime.now(),
     'total_connections': 0,
@@ -326,7 +333,7 @@ system_stats = {
 class RugsWebSocketClient:
     """Connects to Rugs.fun Socket.IO and forwards game updates"""
     def __init__(self):
-        self.sio = socketio.AsyncClient(logger=False, engineio_logger=False)
+        self.sio = socketio.AsyncClient(logger=False, engineio_logger=False, reconnection=True, reconnection_attempts=5)
         self.connected = False
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = int(os.getenv('MAX_RECONNECT_ATTEMPTS', '10'))
@@ -359,21 +366,25 @@ class RugsWebSocketClient:
                 system_stats['total_game_updates'] += 1
                 
                 # Broadcast to connected clients
-                if connected_clients:
+                if connection_manager and connection_manager.metrics['current_connections'] > 0:
+                    logger.debug(f"Broadcasting game update to {connection_manager.metrics['current_connections']} clients - tick: {data.get('tickCount')}")
+                    await connection_manager.broadcast(dashboard_data)
+                elif connected_clients:
                     disconnected = []
                     message = json.dumps(dashboard_data)
-                    
+                    logger.debug(f"Broadcasting to {len(connected_clients)} legacy clients")
                     for ws in connected_clients:
                         try:
                             await ws.send_text(message)
                         except Exception as e:
                             logger.warning(f"Failed to send to client: {e}")
                             disconnected.append(ws)
-                    
                     # Clean up disconnected clients
                     for ws in disconnected:
                         if ws in connected_clients:
                             connected_clients.remove(ws)
+                else:
+                    logger.debug("No clients connected to broadcast to")
                 
                 # Log game completion
                 if data.get('rugged'):
@@ -388,9 +399,14 @@ class RugsWebSocketClient:
                 system_stats['total_errors'] += 1
                 system_stats['last_error'] = f"Game update error: {str(e)}"
 
+        @self.sio.event
+        async def message(data):
+            # Do nothing (listen-only)
+            pass
+
     async def connect_to_rugs(self):
         """Connect to Rugs.fun backend"""
-        rugs_url = os.getenv('RUGS_BACKEND_URL', 'https://backend.rugs.fun?frontend-version=1.0')
+        rugs_url = os.getenv('RUGS_BACKEND_URL') or 'https://backend.rugs.fun?frontend-version=1.0'
         try:
             await self.sio.connect(
                 rugs_url, 
@@ -411,40 +427,47 @@ class RugsWebSocketClient:
             await self.sio.disconnect()
             self.connected = False
 
-# Initialize Rugs client
-rugs_client = RugsWebSocketClient()
+# Initialize Rugs client (can be disabled by env)
+rugs_client = None
+# Enable external Rugs.fun connection by default (listen-only). Set DISABLE_EXTERNAL_RUGS=true to turn off.
+EXTERNAL_FEED_ENABLED = os.getenv('DISABLE_EXTERNAL_RUGS', 'false').lower() not in ['1','true','yes']
+if EXTERNAL_FEED_ENABLED:
+    rugs_client = RugsWebSocketClient()
 
 @app.on_event("startup")
 async def startup_event():
     logger.info("🚀 Starting Rugs Pattern Tracker v2.0.0 - Clean Architecture")
     
-    # Connection manager task
-    async def connection_manager():
-        while True:
-            if not rugs_client.connected and rugs_client.reconnect_attempts < rugs_client.max_reconnect_attempts:
-                logger.info(f"🔄 Attempting to connect to Rugs.fun (attempt {rugs_client.reconnect_attempts + 1})")
-                success = await rugs_client.connect_to_rugs()
-                
-                if not success:
-                    delay = min(rugs_client.reconnect_delay * (2 ** rugs_client.reconnect_attempts), 60)
-                    logger.info(f"⏳ Retrying in {delay} seconds...")
-                    await asyncio.sleep(delay)
-                else:
-                    logger.info("✅ Successfully connected to Rugs.fun")
+    # Connection manager task (only if external feed enabled)
+    if rugs_client is not None:
+        async def connection_manager():
+            while True:
+                if not rugs_client.connected and rugs_client.reconnect_attempts < rugs_client.max_reconnect_attempts:
+                    logger.info(f"🔄 Attempting to connect to Rugs.fun (attempt {rugs_client.reconnect_attempts + 1})")
+                    success = await rugs_client.connect_to_rugs()
                     
-            elif rugs_client.reconnect_attempts >= rugs_client.max_reconnect_attempts:
-                logger.error("💀 Max reconnection attempts reached. Waiting...")
-                await asyncio.sleep(60)
-                rugs_client.reconnect_attempts = 0
-            else:
-                await asyncio.sleep(rugs_client.reconnect_delay)
-    
-    asyncio.create_task(connection_manager())
+                    if not success:
+                        delay = min(rugs_client.reconnect_delay * (2 ** rugs_client.reconnect_attempts), 60)
+                        logger.info(f"⏳ Retrying in {delay} seconds...")
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.info("✅ Successfully connected to Rugs.fun")
+                        
+                elif rugs_client.reconnect_attempts >= rugs_client.max_reconnect_attempts:
+                    logger.error("💀 Max reconnection attempts reached. Waiting...")
+                    await asyncio.sleep(60)
+                    rugs_client.reconnect_attempts = 0
+                else:
+                    await asyncio.sleep(rugs_client.reconnect_delay)
+        asyncio.create_task(connection_manager())
+    else:
+        logger.info("🛑 External Rugs backend connection disabled (EXTERNAL_FEED_ENABLED=false)")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("🛑 Shutting down Rugs Pattern Tracker")
-    await rugs_client.disconnect()
+    if rugs_client:
+        await rugs_client.disconnect()
     
     # Close all websocket connections
     for ws in connected_clients:
@@ -458,13 +481,22 @@ async def shutdown_event():
 
 @app.websocket("/api/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time updates"""
-    await websocket.accept()
-    connected_clients.append(websocket)
-    system_stats['total_connections'] += 1
-    
+    """WebSocket endpoint for real-time updates (compat + ConnectionManager)"""
     client_ip = websocket.client.host if websocket.client else "unknown"
-    logger.info(f"📱 Client connected from {client_ip}. Total: {len(connected_clients)}")
+
+    # If ConnectionManager available, use it; else fallback to legacy list
+    if connection_manager:
+        accepted = await connection_manager.connect(websocket, {"client_ip": client_ip})
+        if not accepted:
+            await websocket.close(code=1008, reason="Max connections reached")
+            return
+        system_stats['total_connections'] += 1
+        logger.info(f"📱 Client connected from {client_ip}. Total: {connection_manager.metrics['current_connections']}")
+    else:
+        await websocket.accept()
+        connected_clients.append(websocket)
+        system_stats['total_connections'] += 1
+        logger.info(f"📱 Client connected from {client_ip}. Total: {len(connected_clients)}")
     
     try:
         # Send initial state if available
@@ -483,7 +515,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 'prediction_history': list(pattern_tracker.prediction_history)[-20:],
                 'side_bet_performance': pattern_tracker.side_bet_performance,
                 'system_status': {
-                    'rugs_connected': rugs_client.connected,
+                    'rugs_connected': bool(rugs_client and rugs_client.connected),
                     'uptime_seconds': int((datetime.now() - system_stats['start_time']).total_seconds()),
                     'total_games': len(pattern_tracker.enhanced_engine.game_history),
                     'version': '2.0.0'
@@ -495,7 +527,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     return o.isoformat()
                 return str(o)
             
-            await websocket.send_text(json.dumps(initial_state, default=_default))
+            if connection_manager:
+                await connection_manager.send_personal(websocket, initial_state)
+            else:
+                await websocket.send_text(json.dumps(initial_state, default=_default))
         
         # Handle incoming messages
         while True:
@@ -503,33 +538,43 @@ async def websocket_endpoint(websocket: WebSocket):
                 msg = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                 
                 if msg == 'ping':
-                    await websocket.send_text(json.dumps({
-                        "type": "pong", 
-                        "timestamp": datetime.now().isoformat()
-                    }))
+                    payload = {"type": "pong", "timestamp": datetime.now().isoformat()}
+                    if connection_manager:
+                        await connection_manager.update_heartbeat(websocket)
+                        await connection_manager.send_personal(websocket, payload)
+                    else:
+                        await websocket.send_text(json.dumps(payload))
                 elif msg == 'status':
                     status = await get_system_status()
-                    await websocket.send_text(json.dumps(status))
+                    if connection_manager:
+                        await connection_manager.send_personal(websocket, status)
+                    else:
+                        await websocket.send_text(json.dumps(status))
                 elif msg == 'side_bet':
-                    # Get current side bet recommendation
                     side_bet = pattern_tracker.enhanced_engine.get_side_bet_recommendation()
-                    await websocket.send_text(json.dumps({
-                        "type": "side_bet_recommendation",
-                        "data": side_bet,
-                        "timestamp": datetime.now().isoformat()
-                    }))
-                    
+                    payload = {"type": "side_bet_recommendation", "data": side_bet, "timestamp": datetime.now().isoformat()}
+                    if connection_manager:
+                        await connection_manager.send_personal(websocket, payload)
+                    else:
+                        await websocket.send_text(json.dumps(payload))
             except asyncio.TimeoutError:
-                # Send keepalive
-                await websocket.send_text(json.dumps({"type": "keepalive"}))
+                keepalive = {"type": "keepalive"}
+                if connection_manager:
+                    await connection_manager.send_personal(websocket, keepalive)
+                    await connection_manager.update_heartbeat(websocket)
+                else:
+                    await websocket.send_text(json.dumps(keepalive))
                 
     except WebSocketDisconnect:
-        logger.info(f"📱 Client disconnected from {client_ip}. Total: {len(connected_clients) - 1}")
+        logger.info(f"📱 Client disconnected from {client_ip}.")
     except Exception as e:
         logger.error(f"❌ WebSocket error for {client_ip}: {e}")
     finally:
-        if websocket in connected_clients:
-            connected_clients.remove(websocket)
+        if connection_manager:
+            await connection_manager.disconnect(websocket)
+        else:
+            if websocket in connected_clients:
+                connected_clients.remove(websocket)
 
 # API Endpoints
 
@@ -539,7 +584,7 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "rugs_connected": rugs_client.connected,
+        "rugs_connected": bool(rugs_client and rugs_client.connected),
         "version": "2.0.0",
     }
 
@@ -557,10 +602,10 @@ async def get_system_status():
             "start_time": system_stats['start_time'].isoformat(),
         },
         "connections": {
-            "rugs_backend": rugs_client.connected,
+            "rugs_backend": bool(rugs_client and rugs_client.connected),
             "frontend_clients": len(connected_clients),
             "total_connections": system_stats['total_connections'],
-            "reconnect_attempts": rugs_client.reconnect_attempts,
+            "reconnect_attempts": (rugs_client.reconnect_attempts if rugs_client else 0),
         },
         "statistics": {
             "total_game_updates": system_stats['total_game_updates'],
