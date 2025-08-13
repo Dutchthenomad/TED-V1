@@ -427,7 +427,8 @@ class RugsWebSocketClient:
 
 # Initialize Rugs client (can be disabled by env)
 rugs_client = None
-EXTERNAL_FEED_ENABLED = os.getenv('EXTERNAL_FEED_ENABLED', os.getenv('DISABLE_EXTERNAL_RUGS', 'false')).lower() in ['1','true','yes']
+# Enable external Rugs.fun connection by default (listen-only). Set DISABLE_EXTERNAL_RUGS=true to turn off.
+EXTERNAL_FEED_ENABLED = os.getenv('DISABLE_EXTERNAL_RUGS', 'false').lower() not in ['1','true','yes']
 if EXTERNAL_FEED_ENABLED:
     rugs_client = RugsWebSocketClient()
 
