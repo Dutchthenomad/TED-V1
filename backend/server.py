@@ -333,7 +333,7 @@ system_stats = {
 class RugsWebSocketClient:
     """Connects to Rugs.fun Socket.IO and forwards game updates"""
     def __init__(self):
-        self.sio = socketio.AsyncClient(logger=False, engineio_logger=False)
+        self.sio = socketio.AsyncClient(logger=False, engineio_logger=False, reconnection=True, reconnection_attempts=5)
         self.connected = False
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = int(os.getenv('MAX_RECONNECT_ATTEMPTS', '10'))
