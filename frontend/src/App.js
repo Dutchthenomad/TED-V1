@@ -33,10 +33,13 @@ const TreasuryPatternDashboard = () => {
   const [lastUpdate, setLastUpdate] = useState(null);
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
+  const isConnectingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const pingIntervalRef = useRef(null);
 
-  const [gameState, setGameState] = useState({ gameId: 0, currentTick: 0, currentPrice: 1.0, isActive: false, isRugged: false, peak_price: 1.0 });
+  const [gameState, setGameState] = useState({ gameId: null, currentTick: 0, currentPrice: 0, rugged: false, peak_price: 1.0 });
   const [patterns, setPatterns] = useState({});
-  const [rugPrediction, setRugPrediction] = useState({ predicted_tick: 200, confidence: 0.5, tolerance: 50, based_on_patterns: [] });
+  const [rugPrediction, setRugPrediction] = useState({ predicted_tick: 200, confidence: 0.5, tolerance: 50, based_on_patterns: [], ml_enhancement: {} });
   const [mlStatus, setMlStatus] = useState(null);
   const [predictionHistory, setPredictionHistory] = useState([]);
   const [connectionStats, setConnectionStats] = useState({ totalUpdates: 0, lastError: null, uptime: 0 });
@@ -61,23 +64,76 @@ const TreasuryPatternDashboard = () => {
     return process.env.REACT_APP_BACKEND_URL || '';
   };
   const getBackendBaseWs = () => {
-    const base = process.env.REACT_APP_BACKEND_URL || '';
+    // Use REACT_APP_WS_URL if available, otherwise derive from BACKEND_URL
+    if (process.env.REACT_APP_WS_URL) {
+      return process.env.REACT_APP_WS_URL.replace(/\/+$/, '');
+    }
+    const base = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
     return base.replace(/^http/i, 'ws');
   };
 
 
   const connectWebSocket = () => {
+    // Don't create a new connection if one already exists and is connecting/open
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.CONNECTING || wsRef.current.readyState === WebSocket.OPEN)) {
+      return;
+    }
+    
+    // Prevent concurrent connection attempts
+    if (isConnectingRef.current) {
+      return;
+    }
+    
+    // Don't connect if component is unmounted
+    if (!mountedRef.current) {
+      return;
+    }
+    
+    isConnectingRef.current = true;
+    
     try {
       const wsUrl = `${getBackendBaseWs()}/api/ws`;
+      console.log('Connecting to WebSocket:', wsUrl);
       wsRef.current = new WebSocket(wsUrl);
-      wsRef.current.onopen = () => { setIsConnected(true); setConnectionStats(prev => ({ ...prev, lastError: null })); };
+      
+      wsRef.current.onopen = () => {
+        console.log('WebSocket connected');
+        isConnectingRef.current = false;
+        if (mountedRef.current) {
+          setIsConnected(true);
+          setConnectionStats(prev => ({ ...prev, lastError: null }));
+          
+          // Start ping interval to keep connection alive
+          if (pingIntervalRef.current) {
+            clearInterval(pingIntervalRef.current);
+          }
+          pingIntervalRef.current = setInterval(() => {
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send('ping');
+              console.log('Sent ping');
+            }
+          }, 25000); // Send ping every 25 seconds
+        }
+      };
+      
       wsRef.current.onmessage = (event) => {
+        if (!mountedRef.current) return;
+        
         try {
           const data = JSON.parse(event.data);
-          if (data.game_state) setGameState(prev => ({ ...prev, ...data.game_state }));
-          if (data.patterns) setPatterns(data.patterns);
-          if (data.prediction) setRugPrediction(data.prediction);
-          if (data.ml_status) setMlStatus(data.ml_status);
+          console.log('WebSocket message received:', data.type || 'data', 'tick:', data.game_state?.currentTick);
+          
+          // Force state updates with new object references to ensure re-render
+          if (data.game_state) {
+            setGameState(prevState => {
+              const newState = { ...data.game_state };
+              console.log('Game state update - Tick:', newState.currentTick, 'Price:', newState.currentPrice);
+              return newState;
+            });
+          }
+          if (data.patterns) setPatterns(() => ({ ...data.patterns }));
+          if (data.prediction) setRugPrediction(() => ({ ...data.prediction }));
+          if (data.ml_status) setMlStatus(() => ({ ...data.ml_status }));
           // Sticky side bet logic: capture first non-null per game
           if (data.game_state?.gameId !== undefined) {
             const gid = data.game_state.gameId;
@@ -101,24 +157,92 @@ const TreasuryPatternDashboard = () => {
           if (data.side_bet_performance) setSideBetPerf(data.side_bet_performance);
           if (data.version) setVersion(data.version);
           if (data.system_status) setWsSystemStatus(data.system_status);
-          setLastPayload(data);
-          setLastUpdate(new Date());
-          setConnectionStats(prev => ({ ...prev, totalUpdates: prev.totalUpdates + 1 }));
+          // Force new Date object and state updates
+          setLastPayload(() => data);
+          setLastUpdate(() => new Date());
+          setConnectionStats(prev => {
+            const newStats = { ...prev, totalUpdates: prev.totalUpdates + 1 };
+            console.log('Total WebSocket updates received:', newStats.totalUpdates);
+            return newStats;
+          });
         } catch (err) {
           setConnectionStats(prev => ({ ...prev, lastError: `Parse error: ${err.message}` }));
         }
       };
-      wsRef.current.onerror = () => { setConnectionStats(prev => ({ ...prev, lastError: 'Connection error' })); };
-      wsRef.current.onclose = () => { setIsConnected(false); reconnectTimeoutRef.current = setTimeout(() => { connectWebSocket(); }, 1500); };
+      wsRef.current.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        isConnectingRef.current = false;
+        if (mountedRef.current) {
+          setConnectionStats(prev => ({ ...prev, lastError: 'Connection error' }));
+        }
+      };
+      
+      wsRef.current.onclose = (event) => {
+        console.log('WebSocket closed:', event.code, event.reason);
+        isConnectingRef.current = false;
+        
+        // Clear ping interval
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current);
+          pingIntervalRef.current = null;
+        }
+        
+        if (mountedRef.current) {
+          setIsConnected(false);
+          
+          // Only attempt reconnect if not a normal closure and component is still mounted
+          if (event.code !== 1000 && event.code !== 1001) {
+            if (reconnectTimeoutRef.current) {
+              clearTimeout(reconnectTimeoutRef.current);
+            }
+            reconnectTimeoutRef.current = setTimeout(() => {
+              if (mountedRef.current) {
+                connectWebSocket();
+              }
+            }, 2000);
+          }
+        }
+      };
     } catch (err) {
-      setConnectionStats(prev => ({ ...prev, lastError: `Connection failed: ${err.message}` }));
-
+      console.error('Failed to create WebSocket:', err);
+      isConnectingRef.current = false;
+      if (mountedRef.current) {
+        setConnectionStats(prev => ({ ...prev, lastError: `Connection failed: ${err.message}` }));
+      }
     }
   };
 
   useEffect(() => {
-    connectWebSocket();
-    return () => { if (wsRef.current) wsRef.current.close(); if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current); };
+    mountedRef.current = true;
+    
+    // Delay initial connection to avoid React StrictMode double-mount issues
+    const connectionTimer = setTimeout(() => {
+      if (mountedRef.current) {
+        connectWebSocket();
+      }
+    }, 100);
+    
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(connectionTimer);
+      
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
+      
+      if (wsRef.current) {
+        if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
+          wsRef.current.close(1000, 'Component unmounting');
+        }
+        wsRef.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {

@@ -366,23 +366,25 @@ class RugsWebSocketClient:
                 system_stats['total_game_updates'] += 1
                 
                 # Broadcast to connected clients
-                if connected_clients:
+                if connection_manager and connection_manager.metrics['current_connections'] > 0:
+                    logger.debug(f"Broadcasting game update to {connection_manager.metrics['current_connections']} clients - tick: {data.get('tickCount')}")
+                    await connection_manager.broadcast(dashboard_data)
+                elif connected_clients:
                     disconnected = []
                     message = json.dumps(dashboard_data)
-                    
-                    if connection_manager:
-                        await connection_manager.broadcast(dashboard_data)
-                    else:
-                        for ws in connected_clients:
-                            try:
-                                await ws.send_text(message)
-                            except Exception as e:
-                                logger.warning(f"Failed to send to client: {e}")
-                                disconnected.append(ws)
-                        # Clean up disconnected clients
-                        for ws in disconnected:
-                            if ws in connected_clients:
-                                connected_clients.remove(ws)
+                    logger.debug(f"Broadcasting to {len(connected_clients)} legacy clients")
+                    for ws in connected_clients:
+                        try:
+                            await ws.send_text(message)
+                        except Exception as e:
+                            logger.warning(f"Failed to send to client: {e}")
+                            disconnected.append(ws)
+                    # Clean up disconnected clients
+                    for ws in disconnected:
+                        if ws in connected_clients:
+                            connected_clients.remove(ws)
+                else:
+                    logger.debug("No clients connected to broadcast to")
                 
                 # Log game completion
                 if data.get('rugged'):
