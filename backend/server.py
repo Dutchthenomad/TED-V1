@@ -13,6 +13,7 @@ import asyncio
 import json
 import socketio
 from collections import deque
+from tick_features import TickFeatureEngine
 
 # Load env
 ROOT_DIR = Path(__file__).parent
@@ -144,6 +145,19 @@ class IntegratedPatternTracker:
         # gating state
         self.last_side_bet_tick = None
         self.last_side_bet_active_until = None
+        
+        # Tick feature engine (if enabled)
+        self.stream_features_enabled = os.getenv("STREAM_FEATURES_ENABLED", "false").lower() == "true"
+        self.stream_influence_enabled = os.getenv("STREAM_INFLUENCE_ENABLED", "false").lower() == "true"
+        if self.stream_features_enabled:
+            self.tick_feature_engine = TickFeatureEngine()
+            self.tick_ring = deque(maxlen=int(os.getenv("STREAM_RING_SIZE", "1200")))
+            self.stream_sample_every = int(os.getenv("STREAM_SAMPLE_EVERY_TICKS", "1"))
+            self.stream_max_cpu_ms = int(os.getenv("STREAM_MAX_CPU_MS", "3"))
+            logger.info("Tick feature engine enabled")
+        else:
+            self.tick_feature_engine = None
+            self.tick_ring = None
 
     def process_game_update(self, data):
         """Process incoming game update from Rugs.fun"""
@@ -188,6 +202,43 @@ class IntegratedPatternTracker:
         # Update pattern engines
         self.enhanced_engine.update_current_game(current_tick, current_price)
         self.ml_engine.update_current_game(current_tick, current_price)
+        
+        # Process tick features if enabled
+        ml_tick = None
+        if self.tick_feature_engine and self.stream_features_enabled:
+            import time
+            start_time = time.time()
+            
+            # Get EPR state
+            epr_active = False
+            try:
+                epr_state = getattr(self.ml_engine, "_epr", {})
+                epr_active = bool(epr_state.get("active", False))
+            except Exception:
+                pass
+            
+            # Update tick features
+            ml_tick = self.tick_feature_engine.update(
+                game_id, current_tick, current_price, 
+                self.current_game['peak_price'], epr_active
+            )
+            
+            # Sample and store in ring buffer
+            if current_tick % self.stream_sample_every == 0:
+                tick_dict = ml_tick.to_dict()
+                self.tick_ring.append(tick_dict)
+            
+            # Apply influence if enabled
+            if self.stream_influence_enabled and hasattr(self.ml_engine, 'register_stream_scale'):
+                try:
+                    self.ml_engine.register_stream_scale(ml_tick.hazard_scale)
+                except Exception as e:
+                    logger.debug(f"Failed to register stream scale: {e}")
+            
+            # Check CPU budget
+            elapsed_ms = (time.time() - start_time) * 1000
+            if elapsed_ms > self.stream_max_cpu_ms:
+                logger.warning(f"Tick feature processing exceeded budget: {elapsed_ms:.1f}ms")
         
         # Get predictions
         prediction = self.ml_engine.predict_rug_timing(
@@ -292,11 +343,35 @@ class IntegratedPatternTracker:
                 except Exception:
                     pass
                     
+                # Calculate directional metrics
+                signed_error = predicted_tick - actual_tick  # negative = early, positive = late
+                E40 = signed_error / 40.0  # window-normalized error
+                
+                # Get spread from last prediction for Ez calculation
+                spread = 80  # default
+                if last_pred and 'quantiles' in last_pred:
+                    q10 = last_pred['quantiles'].get('q10', predicted_tick - 40)
+                    q90 = last_pred['quantiles'].get('q90', predicted_tick + 40)
+                    spread = q90 - q10
+                Ez = signed_error / max(40, spread)  # spread-normalized error
+                
+                # Check if actual was within predicted band
+                in_band = False
+                if last_pred:
+                    coverage_lower = last_pred.get('coverage_lower', predicted_tick - 50)
+                    coverage_upper = last_pred.get('coverage_upper', predicted_tick + 50)
+                    in_band = coverage_lower <= actual_tick <= coverage_upper
+                
                 record = {
                     'game_id': completed_game.game_id,
                     'predicted_tick': predicted_tick,
                     'actual_tick': actual_tick,
                     'diff': diff,
+                    'signed_error': signed_error,
+                    'E40': round(E40, 3),
+                    'Ez': round(Ez, 3),
+                    'spread': int(spread),
+                    'in_band': in_band,
                     'within_tolerance': diff <= 50,
                     'peak_price': completed_game.peak_price,
                     'end_price': completed_game.end_price,
@@ -306,6 +381,14 @@ class IntegratedPatternTracker:
                     'timestamp': datetime.now().isoformat()
                 }
                 self.prediction_history.append(record)
+                
+                # Update ML engine with rolling median E40 for dynamic quantile adjustment
+                if os.getenv("QUANTILE_ADJUSTMENT_ENABLED", "false").lower() == "true":
+                    recent_records = list(self.prediction_history)[-50:]  # Last 50 games
+                    e40_values = [r.get('E40', 0) for r in recent_records if 'E40' in r]
+                    if e40_values:
+                        median_e40 = sorted(e40_values)[len(e40_values)//2]
+                        self.ml_engine._median_e40 = median_e40
             except Exception as e:
                 logger.error(f"Failed to record prediction: {e}")
     
@@ -772,6 +855,61 @@ async def get_game_history(limit: int = 100):
         logger.error(f"Error getting history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+def calculate_directional_metrics(records: list, window_size: int = 50) -> dict:
+    """Calculate directional error metrics from prediction records"""
+    if not records:
+        return {
+            "median_E40": 0.0,
+            "mean_E40": 0.0,
+            "median_signed_error": 0.0,
+            "early_rate": 0.0,
+            "late_rate": 0.0,
+            "within_1_window": 0.0,
+            "within_2_windows": 0.0,
+            "within_3_windows": 0.0,
+            "coverage_rate": 0.0,
+            "early_skew": 0.0
+        }
+    
+    # Get last N records for rolling calculations
+    recent = records[-window_size:] if len(records) > window_size else records
+    
+    # Extract metrics
+    E40_values = [r.get('E40', 0) for r in recent if 'E40' in r]
+    signed_errors = [r.get('signed_error', 0) for r in recent if 'signed_error' in r]
+    
+    # Calculate statistics
+    median_E40 = sorted(E40_values)[len(E40_values)//2] if E40_values else 0
+    mean_E40 = sum(E40_values) / len(E40_values) if E40_values else 0
+    median_signed = sorted(signed_errors)[len(signed_errors)//2] if signed_errors else 0
+    
+    # Direction rates
+    early_count = sum(1 for e in signed_errors if e < 0)
+    late_count = sum(1 for e in signed_errors if e > 0)
+    total = len(signed_errors) if signed_errors else 1
+    
+    # Window accuracy
+    within_1w = sum(1 for e in E40_values if abs(e) <= 1) / len(E40_values) if E40_values else 0
+    within_2w = sum(1 for e in E40_values if abs(e) <= 2) / len(E40_values) if E40_values else 0
+    within_3w = sum(1 for e in E40_values if abs(e) <= 3) / len(E40_values) if E40_values else 0
+    
+    # Coverage rate
+    in_band_count = sum(1 for r in recent if r.get('in_band', False))
+    coverage_rate = in_band_count / len(recent) if recent else 0
+    
+    return {
+        "median_E40": round(median_E40, 3),
+        "mean_E40": round(mean_E40, 3),
+        "median_signed_error": round(median_signed, 1),
+        "early_rate": round(early_count / total, 3),
+        "late_rate": round(late_count / total, 3),
+        "within_1_window": round(within_1w, 3),
+        "within_2_windows": round(within_2w, 3),
+        "within_3_windows": round(within_3w, 3),
+        "coverage_rate": round(coverage_rate, 3),
+        "early_skew": round((early_count - late_count) / total, 3)
+    }
+
 @app.get("/api/prediction-history")
 async def get_prediction_history(limit: int = 200):
     """Get prediction history with accuracy metrics"""
@@ -787,12 +925,16 @@ async def get_prediction_history(limit: int = 200):
             accuracy = 0.0
             avg_error = 0.0
         
+        # Calculate directional metrics
+        directional_metrics = calculate_directional_metrics(records)
+        
         return {
             "history": records,  # Changed from "records" to match frontend expectation
             "metrics": {
                 "accuracy": accuracy,
                 "average_error": avg_error,
                 "within_tolerance_count": within_tolerance if records else 0,
+                **directional_metrics  # Include all directional metrics
             },
             "total": len(pattern_tracker.prediction_history),
             "limit": limit
@@ -801,10 +943,40 @@ async def get_prediction_history(limit: int = 200):
         logger.error(f"Error getting prediction history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/tick-history")
+async def get_tick_history():
+    """Get tick feature history (if enabled)"""
+    try:
+        if not pattern_tracker.stream_features_enabled:
+            return {
+                "enabled": False,
+                "message": "Tick features not enabled. Set STREAM_FEATURES_ENABLED=true",
+                "ticks": []
+            }
+        
+        ticks = list(pattern_tracker.tick_ring) if pattern_tracker.tick_ring else []
+        return {
+            "enabled": True,
+            "ticks": ticks,
+            "count": len(ticks),
+            "max_size": int(os.getenv("STREAM_RING_SIZE", "1200")),
+            "sample_every": pattern_tracker.stream_sample_every,
+            "influence_enabled": pattern_tracker.stream_influence_enabled
+        }
+    except Exception as e:
+        logger.error(f"Error getting tick history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/metrics")
 async def get_metrics():
     """Get comprehensive metrics"""
     stats = pattern_tracker.enhanced_engine.pattern_stats
+    
+    # Calculate directional metrics for different window sizes
+    all_records = list(pattern_tracker.prediction_history)
+    metrics_20 = calculate_directional_metrics(all_records, 20)
+    metrics_50 = calculate_directional_metrics(all_records, 50)
+    metrics_100 = calculate_directional_metrics(all_records, 100)
     
     return {
         "pattern_statistics": {
@@ -832,6 +1004,17 @@ async def get_metrics():
                 "last_updated": stats['pattern3'].last_updated.isoformat(),
                 "validated_improvement": 0.244,  # 24.4% improvement minimum
             },
+        },
+        "directional_metrics": {
+            "last_20": metrics_20,
+            "last_50": metrics_50,
+            "last_100": metrics_100,
+            "targets": {
+                "median_E40": {"target": 0.0, "range": [-0.25, 0.25]},
+                "within_2_windows": {"target": 0.5, "min": 0.5},
+                "coverage_rate": {"target": 0.85, "range": [0.83, 0.87]},
+                "early_skew": {"target": 0.0, "range": [-0.1, 0.1]}
+            }
         },
         "side_bet_metrics": pattern_tracker.side_bet_performance,
         "system_performance": {

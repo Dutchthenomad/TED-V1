@@ -54,6 +54,7 @@ const TreasuryPatternDashboard = () => {
 
   const [avgDiffWindow, setAvgDiffWindow] = useState(20); // Average Diff window (default 20)
   const [historyShowN, setHistoryShowN] = useState(20); // how many rows to display in the table - default to first option
+  const [directionalMetrics, setDirectionalMetrics] = useState(null); // New directional metrics
 
   // Monitoring and REST-enhanced state
   const [wsSystemStatus, setWsSystemStatus] = useState(null);
@@ -83,6 +84,23 @@ const TreasuryPatternDashboard = () => {
         const data = await res.json();
         if (Array.isArray(data?.history)) {
           setPredictionHistory(data.history); // expected up to 200 from backend
+        }
+        // Extract directional metrics from the response
+        if (data?.metrics) {
+          setDirectionalMetrics(data.metrics);
+        }
+      }
+    } catch (_) {}
+  };
+
+  const fetchMetrics = async () => {
+    if (!backend) return;
+    try {
+      const res = await fetch(`${backend}/api/metrics`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.directional_metrics?.last_50) {
+          setDirectionalMetrics(data.directional_metrics.last_50);
         }
       }
     } catch (_) {}
@@ -290,16 +308,19 @@ const TreasuryPatternDashboard = () => {
 
   // Kick off REST polling for history and side-bet
   useEffect(() => {
-    let histTimer = null, sidebetTimer = null;
+    let histTimer = null, sidebetTimer = null, metricsTimer = null;
     fetchPredictionHistory();
     fetchSideBet();
+    fetchMetrics();
     histTimer = setInterval(fetchPredictionHistory, 45000); // 45s cadence
     sidebetTimer = setInterval(fetchSideBet, 2000);         // 2s cadence to not miss windows
-    const onFocus = () => { fetchPredictionHistory(); fetchSideBet(); };
+    metricsTimer = setInterval(fetchMetrics, 30000);         // 30s cadence for metrics
+    const onFocus = () => { fetchPredictionHistory(); fetchSideBet(); fetchMetrics(); };
     window.addEventListener('focus', onFocus);
     return () => {
       if (histTimer) clearInterval(histTimer);
       if (sidebetTimer) clearInterval(sidebetTimer);
+      if (metricsTimer) clearInterval(metricsTimer);
       window.removeEventListener('focus', onFocus);
     };
   }, [backend, stickySideBet, gameState?.currentTick]);
@@ -453,6 +474,50 @@ const TreasuryPatternDashboard = () => {
               })()}
             </div>
             <div className="text-[10px] text-gray-500 mt-1">Average absolute difference in ticks</div>
+          </div>
+
+          {/* Directional Metrics card */}
+          <div className="bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
+            <div className="text-xs font-semibold mb-2">Directional Metrics (50 games)</div>
+            {directionalMetrics ? (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-400">Median E40:</span>
+                  <span className={`font-semibold ${
+                    Math.abs(directionalMetrics.median_E40 || 0) <= 0.25 ? 'text-green-400' : 
+                    Math.abs(directionalMetrics.median_E40 || 0) <= 0.5 ? 'text-yellow-400' : 'text-red-400'
+                  }`}>
+                    {directionalMetrics.median_E40 > 0 ? '+' : ''}{directionalMetrics.median_E40?.toFixed(2)}w
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-400">Within 2w:</span>
+                  <span className={`font-semibold ${
+                    (directionalMetrics.within_2_windows || 0) >= 0.5 ? 'text-green-400' : 'text-yellow-400'
+                  }`}>
+                    {((directionalMetrics.within_2_windows || 0) * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-400">Coverage:</span>
+                  <span className={`font-semibold ${
+                    Math.abs((directionalMetrics.coverage_rate || 0) - 0.85) <= 0.02 ? 'text-green-400' : 'text-yellow-400'
+                  }`}>
+                    {((directionalMetrics.coverage_rate || 0) * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-400">Early Skew:</span>
+                  <span className={`font-semibold ${
+                    Math.abs(directionalMetrics.early_skew || 0) <= 0.1 ? 'text-green-400' : 'text-orange-400'
+                  }`}>
+                    {directionalMetrics.early_skew > 0 ? '+' : ''}{(directionalMetrics.early_skew || 0).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="text-[10px] text-gray-400">Loading metrics...</div>
+            )}
           </div>
         </div>
 

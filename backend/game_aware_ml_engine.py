@@ -34,6 +34,7 @@ class GameAwareMLPatternEngine(MLEnhancedPatternEngine):
         self.enable_conformal = enable_conformal
         self._last_prediction: Optional[Dict[str, Any]] = None
         self._init_epr()  # Initialize Early-Peak Regime
+        self._stream_scale = 1.0  # Initialize stream scale
         
     # -------- EPR: Early Peak Regime --------
     def _init_epr(self):
@@ -81,6 +82,10 @@ class GameAwareMLPatternEngine(MLEnhancedPatternEngine):
         dt = max(0, tick - epr["first_hit_tick"])
         # scale in (0,1], decays toward 1.0 as dt grows
         return cfg["haz_scale"] + (1.0 - cfg["haz_scale"]) * math.exp(-dt / max(1, cfg["haz_tau"]))
+    
+    def register_stream_scale(self, scale: float):
+        """Register hazard scale from tick feature engine"""
+        self._stream_scale = max(0.6, min(1.5, float(scale)))
 
     # --- helper(s)
     def _safe_get(self, d: Dict[str, Any], key: str, default):
@@ -122,12 +127,16 @@ class GameAwareMLPatternEngine(MLEnhancedPatternEngine):
         """
         logits = []
         
-        # Apply EPR hazard scaling
+        # Apply EPR and stream hazard scaling
         scale = 1.0
         if hasattr(self, "_epr"):
             # Use last known tick if available
             last_tick = getattr(self, "_last_tick", 0)
             scale = max(1e-6, self._epr_hazard_scale(last_tick))
+        
+        # Multiply with stream scale if available
+        if hasattr(self, "_stream_scale"):
+            scale *= self._stream_scale
         
         try:
             feats = getattr(self, "feature_extractor", None)
@@ -168,14 +177,31 @@ class GameAwareMLPatternEngine(MLEnhancedPatternEngine):
             q10, q50, q90 = int(hz["q10"]), int(hz["q50"]), int(hz["q90"])
             spread = q90 - q10
             
-            # Use higher quantile when spread is wide or EPR is active
+            # Dynamic quantile adjustment based on recent bias
             qt = 0.5
+            
+            # Check if quantile adjustment is enabled
+            if os.getenv("QUANTILE_ADJUSTMENT_ENABLED", "false").lower() == "true":
+                # Get median E40 from recent predictions (would need to be passed in or stored)
+                median_e40 = getattr(self, "_median_e40", 0.0)
+                
+                # Apply adjustment with dead zone
+                if abs(median_e40) > 0.1:  # Outside dead zone
+                    # qt = 0.5 + clip(medE40, -0.3, +0.3) * 0.3
+                    adjustment = max(-0.3, min(0.3, median_e40)) * 0.3
+                    qt = 0.5 + adjustment
+                    qt = max(0.3, min(0.8, qt))  # Bound between 0.3 and 0.8
+            
+            # Override with higher quantile when spread is wide or EPR is active
             if spread > self._epr["cfg"]["spread_wide"] or self._epr["active"]:
-                qt = self._epr["cfg"]["q_wide"]  # e.g., 0.7
+                qt = max(qt, self._epr["cfg"]["q_wide"])  # e.g., 0.7
             
             # Get the appropriate quantile
             q_key = f"q{int(qt*100)}"
             pred_tick = int(hz.get(q_key, q50))
+            
+            # Store the quantile used for auditing
+            self._qt_used = qt
             
             # stronger pull to prediction when still early in the game
             w = 0.6 if current_tick <= 25 else 0.25
@@ -248,6 +274,10 @@ class GameAwareMLPatternEngine(MLEnhancedPatternEngine):
             epr_active = bool(self._epr.get("active"))
             if epr_active:
                 thr = thr + 0.02  # Prudent bump in long-leaning regime
+        
+        # Additional bump for extreme peaks (10x+)
+        if peak_price >= 10.0:
+            thr = thr + 0.03  # Additional +0.03 for extreme peaks (total +0.05 if EPR also active)
 
         hz = self.hazard.fold_stream(self._build_hazard_logits(horizon=window))
         cdf = hz.get("cdf", [])
