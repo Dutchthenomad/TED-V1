@@ -13,6 +13,7 @@ import asyncio
 import json
 import socketio
 from collections import deque
+from tick_features import TickFeatureEngine
 
 # Load env
 ROOT_DIR = Path(__file__).parent
@@ -120,6 +121,9 @@ TICK_DURATION_MS = 250  # NOT 271.5
 MEDIAN_DURATION = 205
 ULTRA_SHORT_THRESHOLD = 10
 MAX_PAYOUT_THRESHOLD = 0.019
+SIDEBET_WINDOW_TICKS = int(os.getenv("SIDEBET_WINDOW_TICKS", "40"))
+SIDEBET_COOLDOWN_TICKS = int(os.getenv("SIDEBET_COOLDOWN_TICKS", "4"))
+SIDEBET_PWIN_THRESHOLD = float(os.getenv("SIDEBET_PWIN_THRESHOLD", "0.20"))
 
 # Enhanced tracker with side bet integration
 class IntegratedPatternTracker:
@@ -130,7 +134,7 @@ class IntegratedPatternTracker:
         self.ml_engine = GameAwareMLPatternEngine(self.enhanced_engine)
         self.current_game = None
         self.prediction_history = deque(maxlen=200)
-        self.side_bet_history = deque(maxlen=100)
+        self.side_bet_history = deque(maxlen=200)
         self.side_bet_performance = {
             'total_recommendations': 0,
             'positive_ev_bets': 0,
@@ -138,6 +142,22 @@ class IntegratedPatternTracker:
             'bets_lost': 0,
             'total_ev': 0.0
         }
+        # gating state
+        self.last_side_bet_tick = None
+        self.last_side_bet_active_until = None
+        
+        # Tick feature engine (if enabled)
+        self.stream_features_enabled = os.getenv("STREAM_FEATURES_ENABLED", "false").lower() == "true"
+        self.stream_influence_enabled = os.getenv("STREAM_INFLUENCE_ENABLED", "false").lower() == "true"
+        if self.stream_features_enabled:
+            self.tick_feature_engine = TickFeatureEngine()
+            self.tick_ring = deque(maxlen=int(os.getenv("STREAM_RING_SIZE", "1200")))
+            self.stream_sample_every = int(os.getenv("STREAM_SAMPLE_EVERY_TICKS", "1"))
+            self.stream_max_cpu_ms = int(os.getenv("STREAM_MAX_CPU_MS", "3"))
+            logger.info("Tick feature engine enabled")
+        else:
+            self.tick_feature_engine = None
+            self.tick_ring = None
 
     def process_game_update(self, data):
         """Process incoming game update from Rugs.fun"""
@@ -183,17 +203,70 @@ class IntegratedPatternTracker:
         self.enhanced_engine.update_current_game(current_tick, current_price)
         self.ml_engine.update_current_game(current_tick, current_price)
         
+        # Process tick features if enabled
+        ml_tick = None
+        if self.tick_feature_engine and self.stream_features_enabled:
+            import time
+            start_time = time.time()
+            
+            # Get EPR state
+            epr_active = False
+            try:
+                epr_state = getattr(self.ml_engine, "_epr", {})
+                epr_active = bool(epr_state.get("active", False))
+            except Exception:
+                pass
+            
+            # Update tick features
+            ml_tick = self.tick_feature_engine.update(
+                game_id, current_tick, current_price, 
+                self.current_game['peak_price'], epr_active
+            )
+            
+            # Sample and store in ring buffer
+            if current_tick % self.stream_sample_every == 0:
+                tick_dict = ml_tick.to_dict()
+                self.tick_ring.append(tick_dict)
+            
+            # Apply influence if enabled
+            if self.stream_influence_enabled and hasattr(self.ml_engine, 'register_stream_scale'):
+                try:
+                    self.ml_engine.register_stream_scale(ml_tick.hazard_scale)
+                except Exception as e:
+                    logger.debug(f"Failed to register stream scale: {e}")
+            
+            # Check CPU budget
+            elapsed_ms = (time.time() - start_time) * 1000
+            if elapsed_ms > self.stream_max_cpu_ms:
+                logger.warning(f"Tick feature processing exceeded budget: {elapsed_ms:.1f}ms")
+        
         # Get predictions
         prediction = self.ml_engine.predict_rug_timing(
             current_tick, current_price, self.current_game['peak_price']
         )
         
-        # Get side bet recommendation (only early in game)
+        # Capture EPR state at prediction time
+        try:
+            epr_state = getattr(self.ml_engine, "_epr", {})
+            prediction["epr_active_at_prediction"] = bool(epr_state.get("active", False))
+        except Exception:
+            prediction["epr_active_at_prediction"] = False
+            
+        prediction = self._quantize_prediction_tolerance(prediction, current_tick)
+        
+        # Hazard-based side bet recommendation with 40+4 gating
         side_bet = None
-        if current_tick <= 5 and not self.current_game.get('side_bet_evaluated', False):
-            side_bet = self.enhanced_engine.get_side_bet_recommendation()
-            self._record_side_bet_recommendation(side_bet, game_id, current_tick)
-            self.current_game['side_bet_evaluated'] = True
+        can_recommend = True
+        if self.last_side_bet_active_until is not None:
+            can_recommend = current_tick > (self.last_side_bet_active_until + SIDEBET_COOLDOWN_TICKS)
+        if can_recommend:
+            side_bet = self.ml_engine.side_bet_signal(
+                current_tick, current_price, self.current_game['peak_price']
+            )
+            if side_bet and side_bet.get('action') == 'PLACE_SIDE_BET':
+                self._record_side_bet_recommendation(side_bet, game_id, current_tick)
+                self.last_side_bet_tick = current_tick
+                self.last_side_bet_active_until = current_tick + (SIDEBET_WINDOW_TICKS - 1)
         
         # Get pattern dashboard
         patterns = self.enhanced_engine.get_pattern_dashboard_data()
@@ -212,7 +285,7 @@ class IntegratedPatternTracker:
             'prediction': prediction,
             'side_bet_recommendation': side_bet,
             'ml_status': self.ml_engine.get_ml_status(),
-            'prediction_history': list(self.prediction_history)[-20:],
+            'prediction_history': list(self.prediction_history),  # Send full history
             'side_bet_performance': self.side_bet_performance,
             'timestamp': datetime.now().isoformat(),
             'enhanced': True,
@@ -262,22 +335,88 @@ class IntegratedPatternTracker:
                 actual_tick = int(completed_game.final_tick)
                 diff = abs(predicted_tick - actual_tick)
                 
+                # Get EPR state if available
+                epr_active = False
+                try:
+                    epr_state = getattr(self.ml_engine, "_epr", {})
+                    epr_active = bool(epr_state.get("active", False))
+                except Exception:
+                    pass
+                    
+                # Calculate directional metrics
+                signed_error = predicted_tick - actual_tick  # negative = early, positive = late
+                E40 = signed_error / 40.0  # window-normalized error
+                
+                # Get spread from last prediction for Ez calculation
+                spread = 80  # default
+                if last_pred and 'quantiles' in last_pred:
+                    q10 = last_pred['quantiles'].get('q10', predicted_tick - 40)
+                    q90 = last_pred['quantiles'].get('q90', predicted_tick + 40)
+                    spread = q90 - q10
+                Ez = signed_error / max(40, spread)  # spread-normalized error
+                
+                # Check if actual was within predicted band
+                in_band = False
+                if last_pred:
+                    coverage_lower = last_pred.get('coverage_lower', predicted_tick - 50)
+                    coverage_upper = last_pred.get('coverage_upper', predicted_tick + 50)
+                    in_band = coverage_lower <= actual_tick <= coverage_upper
+                
                 record = {
                     'game_id': completed_game.game_id,
                     'predicted_tick': predicted_tick,
                     'actual_tick': actual_tick,
                     'diff': diff,
+                    'signed_error': signed_error,
+                    'E40': round(E40, 3),
+                    'Ez': round(Ez, 3),
+                    'spread': int(spread),
+                    'in_band': in_band,
                     'within_tolerance': diff <= 50,
                     'peak_price': completed_game.peak_price,
                     'end_price': completed_game.end_price,
                     'is_ultra_short': completed_game.is_ultra_short,
                     'is_max_payout': completed_game.is_max_payout,
+                    'epr_active_at_prediction': epr_active,
                     'timestamp': datetime.now().isoformat()
                 }
                 self.prediction_history.append(record)
+                
+                # Update ML engine with rolling median E40 for dynamic quantile adjustment
+                if os.getenv("QUANTILE_ADJUSTMENT_ENABLED", "false").lower() == "true":
+                    recent_records = list(self.prediction_history)[-50:]  # Last 50 games
+                    e40_values = [r.get('E40', 0) for r in recent_records if 'E40' in r]
+                    if e40_values:
+                        median_e40 = sorted(e40_values)[len(e40_values)//2]
+                        self.ml_engine._median_e40 = median_e40
             except Exception as e:
                 logger.error(f"Failed to record prediction: {e}")
     
+    def _quantize_prediction_tolerance(self, prediction: dict, current_tick: int) -> dict:
+        """
+        Make ±tolerance future-safe and aligned to 40-tick windows:
+        - lower bound never before current_tick
+        - total width (2*tol) is a multiple of 40 => tol multiple of 20
+        """
+        try:
+            center = int(prediction.get("predicted_tick", prediction.get("prediction", 0)))
+            tol = int(max(0, prediction.get("tolerance", 0)))
+            # disallow "past coverage": ensure we don't extend below current tick
+            back_limit = max(0, center - current_tick)
+            # quantize tol down: tol is multiple of 20 and ≤ back_limit
+            new_tol = (min(tol, back_limit) // 20) * 20
+            lower = max(current_tick, center - new_tol)
+            upper = center + new_tol
+            width = max(0, upper - lower)
+            windows = max(1, (width + (SIDEBET_WINDOW_TICKS - 1)) // SIDEBET_WINDOW_TICKS)
+            prediction["tolerance"] = new_tol
+            prediction["coverage_lower"] = lower
+            prediction["coverage_upper"] = upper
+            prediction["coverage_windows"] = windows
+        except Exception as e:
+            logger.error(f"Tolerance quantization error: {e}")
+        return prediction
+
     def _record_side_bet_recommendation(self, side_bet, game_id, tick):
         """Record side bet recommendation"""
         if side_bet:
@@ -285,7 +424,9 @@ class IntegratedPatternTracker:
                 'game_id': game_id,
                 'tick': tick,
                 'action': side_bet['action'],
-                'probability': side_bet['ultra_short_probability'],
+                'probability': side_bet.get('p_win_40', side_bet.get('ultra_short_probability', 0)),
+                'p_win_40': side_bet.get('p_win_40'),
+                'coverage_end_tick': tick + (SIDEBET_WINDOW_TICKS - 1),
                 'expected_value': side_bet['expected_value'],
                 'confidence': side_bet['confidence'],
                 'timestamp': datetime.now().isoformat()
@@ -302,8 +443,9 @@ class IntegratedPatternTracker:
         # Check if we made a side bet recommendation for this game
         for bet in list(self.side_bet_history)[-10:]:
             if bet['game_id'] == completed_game.game_id:
-                # Side bet wins if game ended within 40 ticks
-                if completed_game.final_tick <= 40:
+                placed_at = bet.get('tick', 0)
+                # Side bet wins if game ended within placement + window ticks
+                if completed_game.final_tick <= placed_at + SIDEBET_WINDOW_TICKS:
                     self.side_bet_performance['bets_won'] += 1
                     logger.info(f"✅ Side bet WON for game {completed_game.game_id} (ended at {completed_game.final_tick})")
                 else:
@@ -512,7 +654,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 'side_bet_recommendation': pattern_tracker.enhanced_engine.get_side_bet_recommendation()
                     if pattern_tracker.current_game.get('currentTick', 0) <= 5 else None,
                 'ml_status': pattern_tracker.ml_engine.get_ml_status(),
-                'prediction_history': list(pattern_tracker.prediction_history)[-20:],
+                'prediction_history': list(pattern_tracker.prediction_history),  # Send full history
                 'side_bet_performance': pattern_tracker.side_bet_performance,
                 'system_status': {
                     'rugs_connected': bool(rugs_client and rugs_client.connected),
@@ -551,7 +693,12 @@ async def websocket_endpoint(websocket: WebSocket):
                     else:
                         await websocket.send_text(json.dumps(status))
                 elif msg == 'side_bet':
-                    side_bet = pattern_tracker.enhanced_engine.get_side_bet_recommendation()
+                    cg = pattern_tracker.current_game or {}
+                    side_bet = pattern_tracker.ml_engine.side_bet_signal(
+                        cg.get('currentTick', 0),
+                        cg.get('currentPrice', 1.0),
+                        cg.get('peak_price', 1.0),
+                    )
                     payload = {"type": "side_bet_recommendation", "data": side_bet, "timestamp": datetime.now().isoformat()}
                     if connection_manager:
                         await connection_manager.send_personal(websocket, payload)
@@ -647,7 +794,7 @@ async def get_current_patterns():
             "prediction": prediction,
             "side_bet_recommendation": side_bet,
             "ml_status": pattern_tracker.ml_engine.get_ml_status(),
-            "prediction_history": list(pattern_tracker.prediction_history)[-20:],
+            "prediction_history": list(pattern_tracker.prediction_history),  # Send full history
             "side_bet_performance": pattern_tracker.side_bet_performance,
             "current_game": pattern_tracker.current_game,
             "timestamp": datetime.now().isoformat(),
@@ -660,12 +807,17 @@ async def get_current_patterns():
 async def get_side_bet_recommendation():
     """Get current side bet recommendation"""
     try:
-        side_bet = pattern_tracker.enhanced_engine.get_side_bet_recommendation()
+        cg = pattern_tracker.current_game or {}
+        side_bet = pattern_tracker.ml_engine.side_bet_signal(
+            cg.get('currentTick', 0),
+            cg.get('currentPrice', 1.0),
+            cg.get('peak_price', 1.0),
+        )
         
         return {
             "recommendation": side_bet,
             "performance": pattern_tracker.side_bet_performance,
-            "history": list(pattern_tracker.side_bet_history)[-20:],
+            "history": list(pattern_tracker.side_bet_history)[-40:],
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -703,8 +855,63 @@ async def get_game_history(limit: int = 100):
         logger.error(f"Error getting history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+def calculate_directional_metrics(records: list, window_size: int = 50) -> dict:
+    """Calculate directional error metrics from prediction records"""
+    if not records:
+        return {
+            "median_E40": 0.0,
+            "mean_E40": 0.0,
+            "median_signed_error": 0.0,
+            "early_rate": 0.0,
+            "late_rate": 0.0,
+            "within_1_window": 0.0,
+            "within_2_windows": 0.0,
+            "within_3_windows": 0.0,
+            "coverage_rate": 0.0,
+            "early_skew": 0.0
+        }
+    
+    # Get last N records for rolling calculations
+    recent = records[-window_size:] if len(records) > window_size else records
+    
+    # Extract metrics
+    E40_values = [r.get('E40', 0) for r in recent if 'E40' in r]
+    signed_errors = [r.get('signed_error', 0) for r in recent if 'signed_error' in r]
+    
+    # Calculate statistics
+    median_E40 = sorted(E40_values)[len(E40_values)//2] if E40_values else 0
+    mean_E40 = sum(E40_values) / len(E40_values) if E40_values else 0
+    median_signed = sorted(signed_errors)[len(signed_errors)//2] if signed_errors else 0
+    
+    # Direction rates
+    early_count = sum(1 for e in signed_errors if e < 0)
+    late_count = sum(1 for e in signed_errors if e > 0)
+    total = len(signed_errors) if signed_errors else 1
+    
+    # Window accuracy
+    within_1w = sum(1 for e in E40_values if abs(e) <= 1) / len(E40_values) if E40_values else 0
+    within_2w = sum(1 for e in E40_values if abs(e) <= 2) / len(E40_values) if E40_values else 0
+    within_3w = sum(1 for e in E40_values if abs(e) <= 3) / len(E40_values) if E40_values else 0
+    
+    # Coverage rate
+    in_band_count = sum(1 for r in recent if r.get('in_band', False))
+    coverage_rate = in_band_count / len(recent) if recent else 0
+    
+    return {
+        "median_E40": round(median_E40, 3),
+        "mean_E40": round(mean_E40, 3),
+        "median_signed_error": round(median_signed, 1),
+        "early_rate": round(early_count / total, 3),
+        "late_rate": round(late_count / total, 3),
+        "within_1_window": round(within_1w, 3),
+        "within_2_windows": round(within_2w, 3),
+        "within_3_windows": round(within_3w, 3),
+        "coverage_rate": round(coverage_rate, 3),
+        "early_skew": round((early_count - late_count) / total, 3)
+    }
+
 @app.get("/api/prediction-history")
-async def get_prediction_history(limit: int = 50):
+async def get_prediction_history(limit: int = 200):
     """Get prediction history with accuracy metrics"""
     try:
         records = list(pattern_tracker.prediction_history)[-limit:]
@@ -718,12 +925,16 @@ async def get_prediction_history(limit: int = 50):
             accuracy = 0.0
             avg_error = 0.0
         
+        # Calculate directional metrics
+        directional_metrics = calculate_directional_metrics(records)
+        
         return {
-            "records": records,
+            "history": records,  # Changed from "records" to match frontend expectation
             "metrics": {
                 "accuracy": accuracy,
                 "average_error": avg_error,
                 "within_tolerance_count": within_tolerance if records else 0,
+                **directional_metrics  # Include all directional metrics
             },
             "total": len(pattern_tracker.prediction_history),
             "limit": limit
@@ -732,10 +943,40 @@ async def get_prediction_history(limit: int = 50):
         logger.error(f"Error getting prediction history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/tick-history")
+async def get_tick_history():
+    """Get tick feature history (if enabled)"""
+    try:
+        if not pattern_tracker.stream_features_enabled:
+            return {
+                "enabled": False,
+                "message": "Tick features not enabled. Set STREAM_FEATURES_ENABLED=true",
+                "ticks": []
+            }
+        
+        ticks = list(pattern_tracker.tick_ring) if pattern_tracker.tick_ring else []
+        return {
+            "enabled": True,
+            "ticks": ticks,
+            "count": len(ticks),
+            "max_size": int(os.getenv("STREAM_RING_SIZE", "1200")),
+            "sample_every": pattern_tracker.stream_sample_every,
+            "influence_enabled": pattern_tracker.stream_influence_enabled
+        }
+    except Exception as e:
+        logger.error(f"Error getting tick history: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/metrics")
 async def get_metrics():
     """Get comprehensive metrics"""
     stats = pattern_tracker.enhanced_engine.pattern_stats
+    
+    # Calculate directional metrics for different window sizes
+    all_records = list(pattern_tracker.prediction_history)
+    metrics_20 = calculate_directional_metrics(all_records, 20)
+    metrics_50 = calculate_directional_metrics(all_records, 50)
+    metrics_100 = calculate_directional_metrics(all_records, 100)
     
     return {
         "pattern_statistics": {
@@ -763,6 +1004,17 @@ async def get_metrics():
                 "last_updated": stats['pattern3'].last_updated.isoformat(),
                 "validated_improvement": 0.244,  # 24.4% improvement minimum
             },
+        },
+        "directional_metrics": {
+            "last_20": metrics_20,
+            "last_50": metrics_50,
+            "last_100": metrics_100,
+            "targets": {
+                "median_E40": {"target": 0.0, "range": [-0.25, 0.25]},
+                "within_2_windows": {"target": 0.5, "min": 0.5},
+                "coverage_rate": {"target": 0.85, "range": [0.83, 0.87]},
+                "early_skew": {"target": 0.0, "range": [-0.1, 0.1]}
+            }
         },
         "side_bet_metrics": pattern_tracker.side_bet_performance,
         "system_performance": {

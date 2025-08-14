@@ -53,6 +53,8 @@ const TreasuryPatternDashboard = () => {
   const [stickyGameId, setStickyGameId] = useState(null);
 
   const [avgDiffWindow, setAvgDiffWindow] = useState(20); // Average Diff window (default 20)
+  const [historyShowN, setHistoryShowN] = useState(20); // how many rows to display in the table - default to first option
+  const [directionalMetrics, setDirectionalMetrics] = useState(null); // New directional metrics
 
   // Monitoring and REST-enhanced state
   const [wsSystemStatus, setWsSystemStatus] = useState(null);
@@ -72,6 +74,60 @@ const TreasuryPatternDashboard = () => {
     return base.replace(/^http/i, 'ws');
   };
 
+  // --- REST helpers ---
+  const backend = process.env.REACT_APP_BACKEND_URL || '';
+  const fetchPredictionHistory = async () => {
+    if (!backend) return;
+    try {
+      const res = await fetch(`${backend}/api/prediction-history`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data?.history)) {
+          setPredictionHistory(data.history); // expected up to 200 from backend
+        }
+        // Extract directional metrics from the response
+        if (data?.metrics) {
+          setDirectionalMetrics(data.metrics);
+        }
+      }
+    } catch (_) {}
+  };
+
+  const fetchMetrics = async () => {
+    if (!backend) return;
+    try {
+      const res = await fetch(`${backend}/api/metrics`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.directional_metrics?.last_50) {
+          setDirectionalMetrics(data.directional_metrics.last_50);
+        }
+      }
+    } catch (_) {}
+  };
+
+  const fetchSideBet = async () => {
+    if (!backend) return;
+    try {
+      const res = await fetch(`${backend}/api/side-bet`);
+      if (res.ok) {
+        const data = await res.json();
+        const rec = data?.recommendation;
+        if (rec) {
+          setSideBet(rec);
+          // Sticky capture: store the first PLACE_SIDE_BET per game
+          if (!stickySideBet && rec.action === 'PLACE_SIDE_BET' && gameState?.currentTick != null) {
+            setStickySideBet({
+              data: rec,
+              tick: gameState.currentTick,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }
+        if (data?.performance) setSideBetPerf(data.performance);
+      }
+    } catch (_) {}
+  };
 
   const connectWebSocket = () => {
     // Don't create a new connection if one already exists and is connecting/open
@@ -250,6 +306,25 @@ const TreasuryPatternDashboard = () => {
     return () => clearInterval(interval);
   }, [isConnected]);
 
+  // Kick off REST polling for history and side-bet
+  useEffect(() => {
+    let histTimer = null, sidebetTimer = null, metricsTimer = null;
+    fetchPredictionHistory();
+    fetchSideBet();
+    fetchMetrics();
+    histTimer = setInterval(fetchPredictionHistory, 45000); // 45s cadence
+    sidebetTimer = setInterval(fetchSideBet, 2000);         // 2s cadence to not miss windows
+    metricsTimer = setInterval(fetchMetrics, 30000);         // 30s cadence for metrics
+    const onFocus = () => { fetchPredictionHistory(); fetchSideBet(); fetchMetrics(); };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      if (histTimer) clearInterval(histTimer);
+      if (sidebetTimer) clearInterval(sidebetTimer);
+      if (metricsTimer) clearInterval(metricsTimer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [backend, stickySideBet, gameState?.currentTick]);
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'TRIGGERED': return 'text-red-400';
@@ -400,6 +475,50 @@ const TreasuryPatternDashboard = () => {
             </div>
             <div className="text-[10px] text-gray-500 mt-1">Average absolute difference in ticks</div>
           </div>
+
+          {/* Directional Metrics card */}
+          <div className="bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
+            <div className="text-xs font-semibold mb-2">Directional Metrics (50 games)</div>
+            {directionalMetrics ? (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-400">Median E40:</span>
+                  <span className={`font-semibold ${
+                    Math.abs(directionalMetrics.median_E40 || 0) <= 0.25 ? 'text-green-400' : 
+                    Math.abs(directionalMetrics.median_E40 || 0) <= 0.5 ? 'text-yellow-400' : 'text-red-400'
+                  }`}>
+                    {directionalMetrics.median_E40 > 0 ? '+' : ''}{directionalMetrics.median_E40?.toFixed(2)}w
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-400">Within 2w:</span>
+                  <span className={`font-semibold ${
+                    (directionalMetrics.within_2_windows || 0) >= 0.5 ? 'text-green-400' : 'text-yellow-400'
+                  }`}>
+                    {((directionalMetrics.within_2_windows || 0) * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-400">Coverage:</span>
+                  <span className={`font-semibold ${
+                    Math.abs((directionalMetrics.coverage_rate || 0) - 0.85) <= 0.02 ? 'text-green-400' : 'text-yellow-400'
+                  }`}>
+                    {((directionalMetrics.coverage_rate || 0) * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-400">Early Skew:</span>
+                  <span className={`font-semibold ${
+                    Math.abs(directionalMetrics.early_skew || 0) <= 0.1 ? 'text-green-400' : 'text-orange-400'
+                  }`}>
+                    {directionalMetrics.early_skew > 0 ? '+' : ''}{(directionalMetrics.early_skew || 0).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="text-[10px] text-gray-400">Loading metrics...</div>
+            )}
+          </div>
         </div>
 
         <div className="col-span-4 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
@@ -455,10 +574,29 @@ const TreasuryPatternDashboard = () => {
         </div>
 
         <div className="col-span-4 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden flex flex-col">
-          <div className="text-xs font-semibold mb-2">Prediction History</div>
-          <div className="min-h-0 overflow-auto">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <div className="text-xs font-semibold">Prediction History</div>
+              {predictionHistory && predictionHistory.length > 0 && (
+                <div className="text-[10px] text-gray-400">
+                  (showing {Math.min(historyShowN, predictionHistory.length)} of {predictionHistory.length})
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-gray-400">Show</span>
+              <select
+                className="bg-gray-900 border border-gray-700 text-[10px] rounded px-1 py-0.5 focus:outline-none"
+                value={historyShowN}
+                onChange={(e) => setHistoryShowN(Number(e.target.value))}
+              >
+                {[20,50,100,200].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="prediction-history-container min-h-0 overflow-auto prediction-history-scroll smooth-scroll">
             <table className="w-full text-left">
-              <thead className="sticky top-0 bg-gray-800">
+              <thead className="sticky top-0 bg-gray-800 z-10 border-b border-gray-700">
                 <tr className="text-[10px] text-gray-400">
                   <th className="px-2 py-1">Game</th>
                   <th className="px-2 py-1">Pred</th>
@@ -469,8 +607,11 @@ const TreasuryPatternDashboard = () => {
                 </tr>
               </thead>
               <tbody className="text-[11px]">
-                {predictionHistory && predictionHistory.slice().reverse().slice(0, 14).map((r) => (
-                  <tr key={`${r.game_id}-${r.timestamp}`}>
+                {predictionHistory && predictionHistory.slice().reverse().slice(0, historyShowN).map((r, idx) => (
+                  <tr 
+                    key={`${r.game_id}-${r.timestamp}`}
+                    className={`hover:bg-gray-700/30 transition-colors ${idx % 2 === 0 ? 'bg-gray-900/20' : ''}`}
+                  >
                     <td className="px-2 py-1 text-gray-300 truncate max-w-[80px]" title={r.game_id}>{String(r.game_id).slice(-8)}</td>
                     <td className="px-2 py-1 whitespace-nowrap">{r.predicted_tick}</td>
                     <td className="px-2 py-1 whitespace-nowrap">{r.actual_tick}</td>
@@ -497,7 +638,7 @@ const TreasuryPatternDashboard = () => {
         <div className="col-span-4 bg-gray-800 border border-gray-700 rounded p-2 min-h-0 overflow-hidden">
           <div className="text-xs font-semibold mb-2">Side Bet Monitor</div>
           <div className="grid grid-cols-2 gap-2 pr-1 text-[11px]">
-            <div className="flex items-center justify-between"><span className="text-gray-400">Eligible (tick ≤ 5)</span><span className="font-semibold">{(gameState?.currentTick || 0) <= 5 ? 'Yes' : 'No'}</span></div>
+            <div className="flex items-center justify-between"><span className="text-gray-400">Eligible after 40-tick coverage + 4-tick cooldown</span><span className="font-semibold">{(gameState?.currentTick || 0) <= 5 ? 'Yes' : 'No'}</span></div>
             <div className="flex items-center justify-between"><span className="text-gray-400">Last Rec (this game)</span><span className="font-semibold">{stickySideBet ? (stickySideBet.tick + 't') : '—'}</span></div>
             <div className="flex items-center justify-between"><span className="text-gray-400">Total Recs</span><span className="font-semibold">{sideBetPerf?.total_recommendations || 0}</span></div>
             <div className="flex items-center justify-between"><span className="text-gray-400">Win/Loss</span><span className="font-semibold">{(sideBetPerf?.bets_won || 0)}/{(sideBetPerf?.bets_lost || 0)}</span></div>

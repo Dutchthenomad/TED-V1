@@ -36,3 +36,80 @@
         transform: rotate(360deg);
     }
 }
+
+/* Custom scrollbar for prediction history */
+.prediction-history-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #4a5568 #1a202c;
+}
+
+.prediction-history-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.prediction-history-scroll::-webkit-scrollbar-track {
+    background: #1a202c;
+    border-radius: 4px;
+}
+
+.prediction-history-scroll::-webkit-scrollbar-thumb {
+    background: #4a5568;
+    border-radius: 4px;
+    border: 1px solid #2d3748;
+}
+
+.prediction-history-scroll::-webkit-scrollbar-thumb:hover {
+    background: #718096;
+}
+
+.prediction-history-scroll::-webkit-scrollbar-corner {
+    background: #1a202c;
+}
+
+/* Ensure smooth scrolling */
+.smooth-scroll {
+    scroll-behavior: smooth;
+}
+
+/* Max height for prediction history container */
+.prediction-history-container {
+    max-height: 320px;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+
+/* Shadow effects for scroll indication */
+.prediction-history-container::before {
+    content: '';
+    position: absolute;
+    top: 37px; /* Below sticky header */
+    left: 0;
+    right: 8px; /* Account for scrollbar */
+    height: 10px;
+    background: linear-gradient(to bottom, rgba(31, 41, 55, 0.8), transparent);
+    pointer-events: none;
+    z-index: 5;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.prediction-history-container::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 8px; /* Account for scrollbar */
+    height: 10px;
+    background: linear-gradient(to top, rgba(31, 41, 55, 0.8), transparent);
+    pointer-events: none;
+    z-index: 5;
+}
+
+/* Show top shadow when scrolled */
+.prediction-history-container.scrolled::before {
+    opacity: 1;
+}
