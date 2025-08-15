@@ -19,6 +19,15 @@ from tick_features import TickFeatureEngine
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
+# Import persistence integration (safe - will be no-op if disabled)
+try:
+    from persistence_integration import setup_persistence, PersistenceIntegration
+    persistence_available = True
+except ImportError:
+    persistence_available = False
+    logger = logging.getLogger(__name__)
+    logger.info("Persistence module not available - running in-memory only mode")
+
 # MongoDB connection - with safe fallback
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
@@ -182,6 +191,14 @@ class IntegratedPatternTracker:
                 'side_bet_evaluated': False
             }
             
+            # Persist game start if available
+            if persistence and persistence.enabled:
+                asyncio.create_task(persistence.on_game_start(
+                    game_id=game_id,
+                    start_tick=0,
+                    initial_price=current_price
+                ))
+            
             # Reset pattern states for new game
             self.enhanced_engine.pattern_states['pattern3']['current_peak'] = current_price
             self.enhanced_engine.pattern_states['pattern3']['threshold_alerts'] = []
@@ -254,6 +271,25 @@ class IntegratedPatternTracker:
             
         prediction = self._quantize_prediction_tolerance(prediction, current_tick)
         
+        # Persist prediction if available
+        if persistence and persistence.enabled and prediction:
+            predicted_tick = prediction.get('predicted_tick', prediction.get('prediction', 0))
+            asyncio.create_task(persistence.on_prediction_made(
+                game_id=game_id,
+                predicted_at_tick=current_tick,
+                predicted_end_tick=int(predicted_tick),
+                confidence=prediction.get('confidence', 0.5),
+                uncertainty_bounds={
+                    'lower': prediction.get('tolerance_lower', predicted_tick - 40),
+                    'upper': prediction.get('tolerance_upper', predicted_tick + 40)
+                },
+                features={
+                    'epr_active': prediction.get('epr_active_at_prediction', False),
+                    'peak_price': self.current_game['peak_price'],
+                    'current_price': current_price
+                }
+            ))
+        
         # Hazard-based side bet recommendation with 40+4 gating
         side_bet = None
         can_recommend = True
@@ -315,6 +351,15 @@ class IntegratedPatternTracker:
         
         # Update ML engine
         self.ml_engine.complete_game_analysis(completed_game)
+        
+        # Persist game end if available
+        if persistence and persistence.enabled:
+            asyncio.create_task(persistence.on_game_end(
+                game_id=completed_game.game_id,
+                end_tick=completed_game.final_tick,
+                final_price=completed_game.end_price,
+                treasury_remainder=None  # Not available in current data
+            ))
         
         # Log game completion
         logger.info(
@@ -433,6 +478,17 @@ class IntegratedPatternTracker:
             }
             self.side_bet_history.append(record)
             
+            # Persist side bet if available
+            if persistence and persistence.enabled:
+                asyncio.create_task(persistence.on_side_bet_placed(
+                    game_id=game_id,
+                    placed_at_tick=tick,
+                    probability=record['probability'],
+                    expected_value=side_bet['expected_value'],
+                    confidence=side_bet['confidence'],
+                    recommendation=side_bet['action']
+                ))
+            
             self.side_bet_performance['total_recommendations'] += 1
             if side_bet['expected_value'] > 0:
                 self.side_bet_performance['positive_ev_bets'] += 1
@@ -455,6 +511,17 @@ class IntegratedPatternTracker:
 
 # Initialize tracker
 pattern_tracker = IntegratedPatternTracker()
+
+# Initialize persistence if available
+persistence = None
+if persistence_available:
+    try:
+        persistence = setup_persistence(app, db, pattern_tracker)
+        logger.info(f"Persistence system initialized. Enabled: {persistence.enabled}")
+    except Exception as e:
+        logger.warning(f"Could not initialize persistence: {e}. Running in-memory only mode.")
+        persistence = None
+
 # Use enhanced connection manager
 try:
     from core.connection_manager import ConnectionManager
